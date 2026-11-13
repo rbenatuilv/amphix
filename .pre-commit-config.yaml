@@ -1,0 +1,27 @@
+# pre-commit install            (once, in the amphix env)
+# pre-commit run --all-files    (what CI runs)
+#
+# import-linter and mypy are `system` hooks: they run in the active environment, which must have
+# the FEniCSx stack and `pip install -e ".[dev]"` (conda env amphix, or the dolfinx image in CI).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4                        # the same version as the `dev` extra in pyproject.toml
+    hooks:
+      - id: ruff-check
+      - id: ruff-format                 # reformats in place; CI fails on any change
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: layers (import-linter)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: mypy
+        name: types of core/ and config/ (mypy)
+        entry: mypy
+        language: system
+        pass_filenames: false
+        types: [python]

@@ -1,0 +1,26 @@
+# pre-commit (lint, format, layers, types) and every test, in the official
+# dolfinx image of the FEniCSx version the code targets (0.11).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: dolfinx/dolfinx:v0.11.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install amphix and the dev tools
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 -m pip install pyyaml
+          python3 -m pip install -e ".[dev]"
+
+      - name: pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: All tests, slow ones included
+        run: python3 -m pytest -m "slow or not slow"  # overrides the fast-only default (addopts)

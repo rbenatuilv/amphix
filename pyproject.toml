@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amphix"
+version = "0.0.1"
+description = "Brain multiphysics on FEniCSx: DG poroelasticity (Biot) with a conservative velocity"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []          # conda (or the dolfinx image) provides dolfinx, gmsh, pyyaml
+
+[project.scripts]
+amphix = "amphix.cli:main"
+
+[project.optional-dependencies]
+dev = ["ruff==0.17.4", "pre-commit==4.7.0", "import-linter==2.16", "mypy==2.4.1", "pytest"]
+
+[tool.setuptools.packages.find]
+include = ["amphix*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: longer than about 10 s; run with pytest -m slow, or everything with -m 'slow or not slow'"]
+addopts = "-m 'not slow'"
+
+# ---- lint and format ------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "C90", "D", "PL", "RUF"]
+ignore = ["D105", "PLR2004"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.pylint]
+max-args = 6
+max-branches = 12
+
+[tool.ruff.lint.pep8-naming]
+# mathematical symbols: scales, coefficients, matrices and forms
+extend-ignore-names = ["L0", "T0", "P0", "K", "E", "A", "B", "S", "D", "M", "F", "G", "L", "I", "V",
+                       "W", "Vq", "X", "Dd", "Dw", "A_ff", "B_rb", "B_rf", "b_P", "b_W",
+                       "muF", "rhoF", "rhoW", "dS"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "PLR"]
+
+# ---- types: core/ and config/ ---------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["amphix/core", "amphix/config"]
+disallow_untyped_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["dolfinx.*", "ufl.*", "basix.*", "ffcx.*", "petsc4py.*", "slepc4py.*", "mpi4py.*",
+          "gmsh.*", "yaml.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]  # reached through amphix/__init__.py: read, not checked
+module = ["amphix", "amphix.cli", "amphix.physics.*", "amphix.post.*", "amphix.io.*",
+          "amphix.brain.*"]
+follow_imports = "silent"
+
+# ---- layers: each may use only the layers below it ------------------------------------------
+[tool.importlinter]
+root_package = "amphix"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "model stack: brain -> physics -> config -> core"
+type = "layers"
+layers = ["amphix.brain", "amphix.physics", "amphix.config", "amphix.core"]
+
+[[tool.importlinter.contracts]]
+name = "measurement stack: io -> post -> core"
+type = "layers"
+layers = ["amphix.io", "amphix.post", "amphix.core"]
+
+[[tool.importlinter.contracts]]
+name = "the model stack does not use post/ or io/"
+type = "forbidden"
+source_modules = ["amphix.brain", "amphix.physics", "amphix.config", "amphix.core"]
+forbidden_modules = ["amphix.post", "amphix.io"]
+
+[[tool.importlinter.contracts]]
+name = "post/ and io/ do not use config/, physics/ or brain/"
+type = "forbidden"
+source_modules = ["amphix.post", "amphix.io"]
+forbidden_modules = ["amphix.config", "amphix.physics", "amphix.brain"]
+
+[[tool.importlinter.contracts]]
+name = "the layers do not use the command line (cli.py sits on top of them)"
+type = "forbidden"
+source_modules = ["amphix.core", "amphix.config", "amphix.post", "amphix.io",
+                  "amphix.physics", "amphix.brain"]
+forbidden_modules = ["amphix.cli"]

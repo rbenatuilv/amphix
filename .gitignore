@@ -1,0 +1,11 @@
+results/
+*.bp/
+*.h5
+*.xdmf
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+.vscode/
