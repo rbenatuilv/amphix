@@ -47,10 +47,11 @@ max-branches = 12
 # mathematical symbols: scales, coefficients, matrices and forms
 extend-ignore-names = ["L0", "T0", "P0", "K", "E", "A", "B", "S", "D", "M", "F", "G", "L", "I", "V",
                        "W", "Vq", "X", "Dd", "Dw", "A_ff", "B_rb", "B_rf", "b_P", "b_W",
-                       "muF", "rhoF", "rhoW", "dS"]
+                       "muF", "rhoF", "rhoW", "dS", "Ainv"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "PLR"]
+"studies/*" = ["D", "PLR"]
 
 # ---- types: core/ and config/ ---------------------------------------------------------------
 [tool.mypy]
