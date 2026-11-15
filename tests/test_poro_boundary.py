@@ -41,6 +41,7 @@ def test_kinds():
         ("displacement", "mechanical"),
         ("traction", "mechanical"),
         ("normal_traction", "mechanical"),
+        ("roller", "mechanical"),
         ("pressure", "hydraulic"),
         ("flux", "hydraulic"),
     ]

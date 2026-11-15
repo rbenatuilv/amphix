@@ -100,12 +100,13 @@ class TwoField(TwoFieldBalance, Model):
         d, p, vd, q = u["d"], u["p"], v["d"], v["p"]
         sd, p_old = self.sd, self.state.previous["p"]
         self._displacement = boundary.displacement(self.conditions, self.expressions, self.scales)
-        ds_d, ds_p = self.conditions.measure("displacement"), self.conditions.measure("pressure")
+        ds_d, ds_p = boundary.ds_d(self.conditions), self.conditions.measure("pressure")
+        rollers = boundary.rollers(self.conditions)  # d.n = 0: no data in the mass equation
 
         # solid momentum at t^{n+1}; d_tt written through the new d (Newmark)
         F = (
             c["rho"] * ufl.inner(sd.acceleration(d), vd) * m.dx()
-            + elasticity(d, vd, c, m, self._displacement, self.k)
+            + elasticity(d, vd, c, m, self._displacement, self.k, rollers=rollers)
             + c["alpha"] * b_P(p, vd, m, ds_d)
             - ufl.inner(self.sources["body_force"], vd) * m.dx()
         )

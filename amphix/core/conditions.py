@@ -15,6 +15,7 @@ checks of completeness and shapes run when the model is built:
     for c in conditions.of("displacement"):   # in the order of the entries
         c.ds, c.value, c.si                    # measure, data in solver units, data in SI (UFL)
     conditions.measure("pressure")             # ds over every boundary of that kind, or None
+    conditions.measure("displacement", "roller")   # ... of any of these kinds
 
 `si` is kept so that a physics can take exact derivatives in SI (the boundary velocity of a
 prescribed displacement: expressions.ddt(c.si)).
@@ -135,9 +136,9 @@ class Conditions:
         """Return the conditions of one kind, in the order of the entries."""
         return self._of[kind]
 
-    def measure(self, kind: str) -> Any:
-        """Return ds over every boundary with a condition of this kind, or None if there is none."""
-        names = [c.boundary for c in self._of[kind]]
+    def measure(self, *kinds: str) -> Any:
+        """Return ds over the boundaries with a condition of any of these kinds, or None."""
+        names = [c.boundary for k in kinds for c in self._of[k]]
         return self._measures.ds(names) if names else None
 
 

@@ -6,6 +6,7 @@ facets, n the outward normal, h the cell diameter, hF the harmonic mean of the t
 facet, k the degree of d.
 
     elasticity(d, v, c, m, displacement, k)   SIPG of -div sigma_e(d), Nitsche d = g_d
+        rollers=[ds]                          ... and Nitsche d.n = 0 on rollers (poro2)
     b_P(p, v, m, ds_d)                        DG form of (grad p, v)
     darcy(p, q, c, m, ds_p, k)                SIPG of -div(kappa grad p) + beta p, Nitsche p
     b_W(p, w, m, ds_q)                        DG form of (grad p, w) (three-field)
@@ -36,16 +37,26 @@ def elastic_penalty(c: dict[str, Any], k: int) -> Expr:
     return penalty(c["eta"] * (c["lam"] + 2 * c["mu"]), k)
 
 
-def elasticity(
-    d: Expr, v: Expr, c: dict[str, Any], m: Measures, displacement: list, k: int
+def elasticity(  # noqa: PLR0913 (rollers: keyword-only, poro2 only)
+    d: Expr,
+    v: Expr,
+    c: dict[str, Any],
+    m: Measures,
+    displacement: list,
+    k: int,
+    *,
+    rollers: list | None = None,
 ) -> Expr:
-    """Return the SIPG residual of -div sigma_e(d), with Nitsche d = g_d on Gamma_d.
+    """Return the SIPG residual of -div sigma_e(d): Nitsche d = g_d on Gamma_d, d.n = 0 on Gamma_r.
 
         (sigma_e(d), eps(v)) - <{sigma_e(d)}, [[v n]]> - <{sigma_e(v)}, [[d n]]>
           + pen/hF <[[d n]], [[v n]]>                                    (interior facets)
           - <sigma_e(d), (v n)> - <sigma_e(v), ((d - g_d) n)> + pen/h <(d - g_d) n, v n>  (Gamma_d)
 
-    pen = eta (lambda + 2 mu) k^2; displacement is [(ds, g_d, velocity)] (poro.boundary).
+        - <n.sigma_e(d) n, v.n> - <n.sigma_e(v) n, d.n> + pen/h <d.n, v.n>                (Gamma_r)
+
+    Gamma_r: the roller boundaries (d.n = 0, tangential traction zero: natural). pen = eta (lambda
+    + 2 mu) k^2; displacement is [(ds, g_d, velocity)], rollers [ds] (poro.boundary).
     """
     n, pen = m.n, elastic_penalty(c, k)
     F = (
@@ -60,6 +71,13 @@ def elasticity(
             - ufl.inner(sigma_e(v, c), sym_bnd(d - g, n)) * ds
             + pen / m.h * ufl.inner(sym_bnd(d - g, n), sym_bnd(v, n)) * ds
         )
+    for ds in rollers or []:
+        dn, vn = ufl.inner(d, n), ufl.inner(v, n)
+        F += (
+            -ufl.inner(ufl.dot(sigma_e(d, c), n), n) * vn * ds
+            - ufl.inner(ufl.dot(sigma_e(v, c), n), n) * dn * ds
+            + pen / m.h * dn * vn * ds
+        )
     return F
 
 
@@ -68,7 +86,7 @@ def b_P(p: Expr, v: Expr, m: Measures, ds_d: Any) -> Expr:
 
     Used as +alpha b_P(p, v) in the solid momentum equation and -alpha b_P(q, d_t) in the mass
     equation, so the discrete coupling is exactly antisymmetric (energy-stable). ds_d: the measure
-    of the displacement boundaries (None if there are none).
+    of the boundaries where d.n is prescribed, displacement and roller (None if there are none).
     """
     n = m.n
     F = -p * ufl.div(v) * m.dx() + ufl.avg(p) * ufl.jump(v, n) * m.dS

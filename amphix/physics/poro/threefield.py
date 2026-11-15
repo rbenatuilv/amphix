@@ -79,6 +79,7 @@ class ThreeField(ThreeFieldBalance, Model):
         self.derive("flux", self.sw.z_old)
         self.derive("velocity", self.sd.z_old)
         times = np.linspace(tc.t0, tc.T, 5)  # sample times
+        boundary.require_no_roller(self.conditions)
         boundary.require_zero_flux(self.conditions, mesh, self.state.t, times, self.scales.T0)
 
     def residual(self, u: dict[str, Any], v: dict[str, Any]) -> Any:

@@ -6,6 +6,8 @@ Every boundary carries one mechanical and one hydraulic condition:
                                                            equation (poro2), or g_d (poro3)
                  traction          (sigma_e - alpha p I) n = t_N    natural, the total traction
                  normal_traction   ... = s n  (a fluid at pressure P on the wall: s = -P)
+                 roller            d.n = 0, (sigma_e n)_t = 0   Nitsche on d.n, tangent natural;
+                                                           only 0, poro2 only
     hydraulic    pressure          p = g_p                 poro2: Nitsche; poro3: natural
                  flux              outward q.n = g_q       poro2: natural; poro3: only 0 (w.n = 0)
 
@@ -16,6 +18,8 @@ Data, in solver units (core.conditions does the scaling and the completeness che
 
     displacement(conditions, expressions, scales)  [(ds, g_d, velocity of g_d)]  exact d/dt (SI)
     tractions(conditions)                          [(ds, t_N)]  traction and normal_traction
+    rollers(conditions)                            [ds]  the roller boundaries (data only 0)
+    ds_d(conditions)                               ds over displacement and roller boundaries
     pairs(conditions, kind)                        [(ds, value)]  pressure, flux
     require_zero_flux(...)                         poro3: every flux value is zero at all times
 """
@@ -43,6 +47,7 @@ CONDITIONS = (
     ConditionKind("displacement", "mechanical", "vector", DISPLACEMENT),
     ConditionKind("traction", "mechanical", "vector", PRESSURE),
     ConditionKind("normal_traction", "mechanical", "normal", PRESSURE),
+    ConditionKind("roller", "mechanical", "scalar", DISPLACEMENT),
     ConditionKind("pressure", "hydraulic", "scalar", PRESSURE),
     ConditionKind("flux", "hydraulic", "scalar", VELOCITY),
 )
@@ -71,6 +76,25 @@ def tractions(conditions: Conditions) -> list[Pair]:
     """Return [(ds, t_N)] of the traction and normal_traction boundaries, in the entry order."""
     given = conditions.of("traction") + conditions.of("normal_traction")
     return [(c.ds, c.value) for c in sorted(given, key=_order(conditions))]
+
+
+def rollers(conditions: Conditions) -> list[Any]:
+    """Return [ds] of the roller boundaries; raise unless every roller value is the number 0."""
+    for c in conditions.of("roller"):
+        if not isinstance(c.si, dolfinx.fem.Constant) or np.any(c.si.value != 0):
+            raise ValueError(f"boundaries.{c.boundary}.roller: only roller: 0 is supported")
+    return [c.ds for c in conditions.of("roller")]
+
+
+def ds_d(conditions: Conditions) -> Any:
+    """Return ds over the boundaries where d.n is prescribed (displacement, roller), or None."""
+    return conditions.measure("displacement", "roller")
+
+
+def require_no_roller(conditions: Conditions) -> None:
+    """Raise if any boundary has a roller (poro3 does not implement it)."""
+    for c in conditions.of("roller"):
+        raise ValueError(f"boundaries.{c.boundary}.roller: roller is supported only in poro2")
 
 
 def pairs(conditions: Conditions, kind: str) -> list[Pair]:

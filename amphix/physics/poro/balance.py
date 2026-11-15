@@ -79,7 +79,7 @@ class TwoFieldBalance:
             c["c0"] / self.state.dt * (p - p0) * q * m.dx()
             + c["beta"] * (th * p + (1 - th) * p0) * q * m.dx()
             - (th * g + (1 - th) * self._old(g)) * q * m.dx()
-            - c["alpha"] * b_P(q, z_th, m, self.conditions.measure("displacement"))
+            - c["alpha"] * b_P(q, z_th, m, boundary.ds_d(self.conditions))
         )
         for ds, _, gd_t in boundary.displacement(self.conditions, self.expressions, self.scales):
             G += c["alpha"] * q * ufl.inner(th * gd_t + (1 - th) * self._old(gd_t), n) * ds
