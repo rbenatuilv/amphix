@@ -8,12 +8,14 @@ The shapes, the keys each one accepts (besides `shape` and `names`) and the boun
     rectangle   corners, n | h, diagonal       left, right, bottom, top
     box         corners, n | h                 left, right, front, back, bottom, top
     disc, ball  center, radius, h              outer
-    annulus,    center, radius, inner, h       outer, inner (inner = {center, radius}: the hole)
-    shell
+    annulus,    center, radius, inner, h,      outer, inner (inner = {center, radius}: the hole)
+    shell       wall
     gmsh        file, dim, facets, cells       the named physical groups of the file
 
-`names: {old: new}` renames boundaries and subdomains. check() rejects an unknown shape or key, and
-a rectangle or box without n or h, before any meshing (config calls it at load time).
+`wall: {h, band, growth}` refines an annulus or shell at both walls: size wall.h within band of
+either wall, growing to h at band + growth. `names: {old: new}` renames boundaries and
+subdomains. check() rejects an unknown shape or key, and a rectangle or box without n or h, before
+any meshing (config calls it at load time).
 """
 
 from pathlib import Path
@@ -28,8 +30,8 @@ SHAPE_KEYS: dict[str, set[str]] = {
     "box": {"corners", "n", "h"},
     "disc": {"center", "radius", "h"},
     "ball": {"center", "radius", "h"},
-    "annulus": {"center", "radius", "inner", "h"},
-    "shell": {"center", "radius", "inner", "h"},
+    "annulus": {"center", "radius", "inner", "h", "wall"},
+    "shell": {"center", "radius", "inner", "h", "wall"},
     "gmsh": {"file", "dim", "facets", "cells"},
 }
 REQUIRED: dict[str, set[str]] = {
@@ -76,6 +78,12 @@ def check(section: dict) -> None:
         raise ValueError(f"mesh ({shape}): give n or h")
     if "inner" in section and set(section["inner"]) != {"center", "radius"}:
         raise ValueError(f"mesh ({shape}): inner takes center and radius")
+    if "wall" in section:
+        wall = section["wall"]
+        if not isinstance(wall, dict) or set(wall) != {"h", "band", "growth"}:
+            raise ValueError(f"mesh ({shape}): wall takes h, band and growth")
+        if not all(isinstance(v, int | float) and v > 0 for v in wall.values()):
+            raise ValueError(f"mesh ({shape}): wall h, band and growth must be positive numbers")
 
 
 def build(section: dict, L0: float = 1.0, root: str | Path = ".") -> Domain:

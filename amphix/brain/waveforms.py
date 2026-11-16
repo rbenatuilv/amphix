@@ -1,17 +1,22 @@
 """Brain waveforms of one cardiac cycle per second (t in s), usable as `{waveform: name, ...}` data.
 
-    cardiac_pulse      p_c(t) = A (1 - cos 2 pi t) / 2                [Pa]   A = 133.3 Pa
-    transmantle        delta_p(t) = dp sin 2 pi t                     [Pa]   dp = 1.5 Pa
-    vascular_option1   g(t) = G sin 2 pi t                            [1/s]  G = 3.53e-3 1/s
-    vascular_option2   g(t) = G (sin 2 pi t + weight sin 4 pi t)      [1/s]  weight = 0.5
+    cardiac_pulse         p_c(t) = A (1 - cos 2 pi t) / 2             [Pa]   A = 133.3 Pa
+    cardiac_oscillation   p_c(t) = (A / 2) sin 2 pi t                 [Pa]   A = 133.3 Pa
+    transmantle           delta_p(t) = gradient L sin 2 pi t          [Pa]   194.6 Pa/m, 7.5 mm
+    vascular_option1      g(t) = G sin 2 pi t                         [1/s]  G = 3.53e-3 1/s
+    vascular_option2      g(t) = G (sin 2 pi t + weight sin 4 pi t)   [1/s]  weight = 0.5
 
 For example `sources: {fluid_source: {waveform: vascular_option2, G: 3.53e-3}}`. Each function
 takes t as UFL (in a model) or as numbers (numpy).
 
 Sources of the values:
-- A = 133.3 Pa = 1 mmHg: the pulse amplitude; it starts from rest, with its peak at t = 1/2.
-- dp = 1.5 Pa: the cardiac transmantle gradient of 1.46 mmHg/m (Vinje et al., as reported in
-  [PRV23]) times the tissue length of the annulus: 194.6 Pa/m x 7.5 mm = 1.46 Pa.
+- A = 133.3 Pa = 1 mmHg: the pulse amplitude, max - min. cardiac_pulse starts from rest, with its
+  peak at t = 1/2. cardiac_oscillation is the same swing without its mean, between -A/2 and A/2,
+  starting at 0 (no jump at t = 0): a brain pulsing for a long time, whose mean pressure is
+  already uniform (starting from rest with the mean adds a slow start-up drift).
+- gradient = 194.6 Pa/m = 1.46 mmHg/m: the cardiac transmantle gradient (Vinje et al., as
+  reported in [PRV23]). L is the ventricle-pial distance, by default the mean tissue thickness of
+  the annulus, geometries.MEAN_THICKNESS = 7.5 mm: an amplitude of 1.46 Pa.
 - G = 3.53e-3 1/s: the vascular fluid source per tissue volume, calibrated to a stroke volume of
   1.12e-3 of the tissue volume (1.54 ml over a 1369.54 ml parenchyma, [CVR22]). The stroke volume
   is max - min of int_0^t g over a period, the volume added during inflow: G / pi, for option 1
@@ -26,10 +31,11 @@ from typing import Any
 import numpy as np
 import ufl
 
+from amphix.brain.geometries import MEAN_THICKNESS
 from amphix.core.expressions import register_waveform
 
 A_PULSE = 133.3  # Pa, 1 mmHg
-DP_TRANSMANTLE = 1.5  # Pa
+GRADIENT_TRANSMANTLE = 194.6  # Pa/m, 1.46 mmHg/m
 G_VASCULAR = 3.53e-3  # 1/s
 WEIGHT = 0.5  # of the second harmonic (option 2)
 
@@ -47,9 +53,14 @@ def cardiac_pulse(t: Any, A: float = A_PULSE) -> Any:
     return A * (1 - _cos(2 * math.pi * t)) / 2
 
 
-def transmantle(t: Any, dp: float = DP_TRANSMANTLE) -> Any:
-    """Return the transmantle pressure difference dp sin 2 pi t [Pa]."""
-    return dp * _sin(2 * math.pi * t)
+def cardiac_oscillation(t: Any, A: float = A_PULSE) -> Any:
+    """Return the zero-mean cardiac pulse (A / 2) sin 2 pi t [Pa]: 0 at t = 0, peak A/2 at 1/4."""
+    return A / 2 * _sin(2 * math.pi * t)
+
+
+def transmantle(t: Any, gradient: float = GRADIENT_TRANSMANTLE, L: float = MEAN_THICKNESS) -> Any:
+    """Return the transmantle pressure difference gradient [Pa/m] x L [m] x sin 2 pi t [Pa]."""
+    return gradient * L * _sin(2 * math.pi * t)
 
 
 def vascular(t: Any, G: float = G_VASCULAR, option: int = 2, weight: float = WEIGHT) -> Any:
@@ -78,7 +89,8 @@ def vascular_option2(t: Any, G: float = G_VASCULAR, weight: float = WEIGHT) -> A
 
 
 WAVEFORMS = {
-    f.__name__: f for f in (cardiac_pulse, transmantle, vascular_option1, vascular_option2)
+    f.__name__: f
+    for f in (cardiac_pulse, cardiac_oscillation, transmantle, vascular_option1, vascular_option2)
 }
 for _name, _f in WAVEFORMS.items():
     register_waveform(_name, _f)

@@ -185,10 +185,24 @@ def test_option2_stroke_volume_needs_weight_at_most_one_half():
 def test_pulse_and_transmantle():
     t = np.array([0.0, 0.25, 0.5, 0.75])
     assert np.allclose(waveforms.cardiac_pulse(t), [0.0, 66.65, 133.3, 66.65], atol=1e-12)
-    assert np.allclose(waveforms.transmantle(t), [0.0, 1.5, 0.0, -1.5], atol=1e-12)
+    dp = 194.6 * 7.5e-3  # Pa/m x m: 1.46 Pa
+    assert dp == pytest.approx(1.46, abs=1e-3)
+    assert np.allclose(waveforms.transmantle(t), [0.0, dp, 0.0, -dp], atol=1e-12)
+    assert np.allclose(waveforms.transmantle(t, gradient=100.0, L=1e-2), [0.0, 1.0, 0.0, -1.0])
     assert np.allclose(waveforms.vascular(t, option=2, weight=0.0), waveforms.vascular(t, option=1))
     with pytest.raises(ValueError, match="option must be 1 or 2"):
         waveforms.vascular(t, option=3)
+
+
+def test_cardiac_oscillation():
+    """The pulse without its mean: 0 at t = 0, zero mean over a period, extremes -A/2 and A/2."""
+    t = np.linspace(0.0, 1.0, 1001)[:-1]
+    p = waveforms.cardiac_oscillation(t)
+    assert abs(p.mean()) < 1e-12
+    assert p.min() == pytest.approx(-133.3 / 2) and p.max() == pytest.approx(133.3 / 2)
+    assert p[0] == 0.0  # starts at 0: no jump from a field at rest
+    assert p.max() - p.min() == pytest.approx(np.ptp(waveforms.cardiac_pulse(t)))  # same swing
+    assert np.allclose(waveforms.cardiac_oscillation(np.array([0.25, 0.75]), A=2.0), [1.0, -1.0])
 
 
 @pytest.mark.parametrize("name", sorted(waveforms.WAVEFORMS))
@@ -237,12 +251,58 @@ def test_annulus():
     assert lengths["pial"] == pytest.approx(2 * math.pi * 1e-2, rel=1e-3)
 
 
+def test_annulus_wall_refinement():
+    """Small isotropic cells at both walls, h far from them, the same boundary names."""
+    h, wall = 5e-4, {"h": 2e-4, "band": 1e-4, "growth": 1e-3}
+    assert "wall" not in geometries.annulus()
+    domain = build(geometries.annulus(h=h, wall=wall), 1e-2)
+    assert set(domain.facet_names) == {"ventricle", "pial"}
+    size, ratio, centre = triangle_shapes(domain)
+    mesh, tags = domain.mesh, domain.facet_tags
+    f2c = mesh.topology.connectivity(1, 2)
+    for name in ("ventricle", "pial"):
+        facets = tags.indices[tags.values == domain.facet_tag(name)]
+        cells = np.unique(np.concatenate([f2c.links(f) for f in facets]))
+        assert size[cells].max() <= 1.5 * wall["h"], name
+    r_pial = 1e-2 - np.linalg.norm(centre, axis=1)
+    r_ventricle = np.linalg.norm(centre - [3e-3, 0.0], axis=1) - 2.5e-3
+    far = np.minimum(r_pial, r_ventricle) > wall["band"] + wall["growth"] + h
+    assert np.median(size[far]) == pytest.approx(h, rel=0.1)
+    assert 0.7 * h < size[far].min() and size[far].max() < 1.5 * h
+    assert ratio.max() < 2.5  # isotropic
+
+
+def triangle_shapes(domain):
+    """Per local cell: the diameter (longest edge) [m], R / 2r (1: equilateral), the centre [m]."""
+    mesh = domain.mesh
+    n = mesh.topology.index_map(2).size_local
+    X = mesh.geometry.x[mesh.geometry.dofmaps[0][:n]][:, :, :2] * domain.L0
+    a, b, c = np.linalg.norm(X - np.roll(X, 1, axis=1), axis=2).T
+    s = (a + b + c) / 2
+    area2 = s * (s - a) * (s - b) * (s - c)  # Heron: area squared
+    return np.maximum(np.maximum(a, b), c), a * b * c * s / (8 * area2), X.mean(axis=1)
+
+
 def test_shell():
     domain = build(geometries.shell(), 1e-2)
     assert domain.dim == 3 and set(domain.facet_names) == {"ventricle", "pial"}
     areas = boundary_sizes(domain)  # coarse (h = 2 mm on a 2.5 mm hole): the ventricle 12 % short
     assert areas["ventricle"] == pytest.approx(4 * math.pi * 2.5e-3**2, rel=0.15)
     assert areas["pial"] == pytest.approx(4 * math.pi * 1e-2**2, rel=0.02)
+
+
+def test_shell_wall_refinement():
+    """The shell takes the same wall refinement: more cells, smaller at the walls, same names."""
+    section = geometries.shell()
+    plain = build(section, 1e-2)
+    refined = build({**section, "wall": {"h": 1e-3, "band": 5e-4, "growth": 2e-3}}, 1e-2)
+    assert set(refined.facet_names) == {"ventricle", "pial"}
+    cells = [d.mesh.topology.index_map(3).size_global for d in (plain, refined)]
+    assert cells[1] > 2 * cells[0]
+    # finer at the wall: the ventricle area closer to 4 pi r^2
+    ventricle = [boundary_sizes(d)["ventricle"] for d in (plain, refined)]
+    exact = 4 * math.pi * 2.5e-3**2
+    assert abs(ventricle[1] - exact) < abs(ventricle[0] - exact) / 2
 
 
 def boundary_sizes(domain):

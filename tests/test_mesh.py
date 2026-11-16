@@ -87,6 +87,10 @@ def test_gmsh_file_with_subdomains(tmp_path):
     assert i["dx_tissue"] == pytest.approx(0.25) and i["dx_fluid"] == pytest.approx(0.25)  # / L0^2
 
 
+HOLED = {"shape": "annulus", "radius": 1, "h": 0.1, "inner": {"center": [0, 0], "radius": 0.2}}
+WALL = {"h": 0.01, "band": 0.05, "growth": 0.1}
+
+
 @pytest.mark.parametrize(
     "section, match",
     [
@@ -99,6 +103,9 @@ def test_gmsh_file_with_subdomains(tmp_path):
             "inner takes",
         ),
         ({"shape": "gmsh", "file": "x.msh", "tags": {"a": 1}}, "unknown key"),  # was tags: facets
+        ({"shape": "disc", "radius": 1, "h": 0.1, "wall": WALL}, "unknown key"),  # no hole
+        ({**HOLED, "wall": {"h": 0.01, "band": 0.1}}, "wall takes"),
+        ({**HOLED, "wall": {**WALL, "h": 0.0}}, "positive numbers"),
     ],
 )
 def test_checks(section, match):
