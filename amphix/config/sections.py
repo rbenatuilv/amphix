@@ -10,6 +10,8 @@
     boundaries  {boundary: {kind: data}}         kinds the model has, at most one per family;
                                                  completeness is checked when the model is built
     sources     {name: data}                     names the model reads
+    initial     Initial: the state at t0         a saved fields file, or data per state key;
+                                                 default: rest
 
 A physics adds its own sections through its model class (`sections`): each is a class with
 from_dict(raw, path, model).
@@ -18,7 +20,10 @@ from_dict(raw, path, model).
 import numbers
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
+
+import numpy as np
 
 from amphix.config.validate import ConfigError, check_keys, join, mapping, number, unread
 from amphix.core import mesh as core_mesh
@@ -207,3 +212,79 @@ def sources(raw: Any, model: Any) -> dict:
     for name, value in raw.items():
         data(join("sources", name), value)
     return dict(raw)
+
+
+@dataclass(frozen=True)
+class Initial:
+    """The state at t0, from a saved fields file or from data (otherwise the run starts at rest).
+
+        initial: {from: results/steady_fields.npz, time: last}     # d and p saved by a run
+        initial: {p: "gamma * (1 - r / 1e-2)", d: [0, 0]}          # data, evaluated at t0
+
+    From a file: the model's fields at one saved time (`last`, the default, or a time in s), every
+    other tracked state (d_t, d_tt) zero; the path is relative to the YAML file. From data: any
+    state of the model (its fields, and what it tracks: d_t, d_tt), the others zero. The boundary
+    data at t0 should agree with this state; nothing checks it.
+    """
+
+    path: Path | None = None  # the fields file
+    index: int = -1  # which of its saved times
+    time: float = 0.0  # that saved time [s]
+    values: dict = field(default_factory=dict)  # or {state: data}
+
+
+def initial(raw: Any, model: Any, root: Path) -> Initial | None:
+    """Return the `initial` section (None: start at rest); a file is checked for the fields."""
+    raw = mapping("initial", raw if raw is not None else {})
+    if not raw:
+        return None
+    state = {*model.fields, *model.tracked}
+    for key in raw:
+        if key not in {"from", "time", *state}:
+            raise ConfigError(
+                join("initial", key),
+                f"not state of {model.name}: give `from` (and `time`) or some of {sorted(state)}",
+            )
+    given = sorted(set(raw) & state)
+    if "from" in raw and given:
+        raise ConfigError("initial", f"`from` and {given}: give a fields file or data, not both")
+    if "from" in raw:
+        return _saved(raw, model, root)
+    if "time" in raw:
+        raise ConfigError("initial.time", "only with `from`")
+    for key, value in raw.items():
+        data(join("initial", key), value)
+    return Initial(values=dict(raw))
+
+
+def _saved(raw: Mapping[str, Any], model: Any, root: Path) -> Initial:
+    if not model.restarts:
+        raise NotImplementedError(f"initial.from: {model.name} cannot start from a fields file")
+    path = Path(str(raw["from"]))
+    path = path if path.is_absolute() else root / path
+    if not path.is_file():
+        raise ConfigError("initial.from", f"no file {path}")
+    try:
+        with np.load(path) as f:
+            names, times = [str(n) for n in f["names"]], np.asarray(f["snap_t"], dtype=float)
+    except (OSError, ValueError, KeyError) as e:
+        raise ConfigError("initial.from", f"{path} is not a fields file ({e})") from e
+    missing = sorted(set(model.fields) - set(names))
+    if missing:
+        raise ConfigError(
+            "initial.from", f"{path.name} has no {missing}; it has {names} (output.fields)"
+        )
+    if len(times) == 0:
+        raise ConfigError("initial.from", f"{path.name} holds no saved time (output.snapshots)")
+    when = raw.get("time", "last")
+    if when == "last":
+        index = len(times) - 1
+    else:
+        t = number("initial.time", when)
+        hits = np.flatnonzero(np.abs(times - t) <= 1e-9 * max(1.0, abs(t)))
+        if len(hits) == 0:
+            raise ConfigError(
+                "initial.time", f"{t} is not saved in {path.name}; saved: {times.tolist()} or last"
+            )
+        index = int(hits[0])
+    return Initial(path=path, index=index, time=float(times[index]))

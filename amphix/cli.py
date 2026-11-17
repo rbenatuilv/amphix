@@ -21,17 +21,19 @@ from mpi4py import MPI
 
 from amphix.config import ConfigError, load, parse_set
 from amphix.core.model import make_model
+from amphix.io.initial import apply_initial
 from amphix.io.recorder import Recorder
 
 
 def run(problem: Any, verbose: bool = True) -> Path | None:
-    """Build the problem's model, run it to T with a Recorder, save; return the results path.
+    """Build the problem's model, set its initial state, run it to T with a Recorder, save.
 
-    The path is returned on rank 0 (None on the others).
+    Return the results path on rank 0 (None on the others).
     """
     talk = verbose and MPI.COMM_WORLD.rank == 0
     start = time.perf_counter()
     model = make_model(problem)
+    apply_initial(model)
     if talk:
         mesh = model.domain.mesh
         cells = mesh.topology.index_map(mesh.topology.dim).size_global

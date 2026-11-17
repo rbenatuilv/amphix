@@ -18,7 +18,8 @@ with startup_steps > 0 the first steps use theta = 1 (Rannacher start). Quadratu
 2 deg + 1, whatever deg_p is.
 
 Boundary conditions and sources: physics.poro.boundary. Initial state: rest, or
-set_initial(d=..., d_t=..., d_tt=..., p=...) in SI.
+set_initial(d=..., d_t=..., d_tt=..., p=...) in SI (the YAML `initial` section); d_t and d_tt not
+given are zero.
 """
 
 from typing import Any, ClassVar
@@ -47,6 +48,7 @@ class TwoField(TwoFieldBalance, Model):
     condition_kinds = boundary.CONDITIONS
     source_kinds = boundary.SOURCES_2F
     time_keys = frozenset({"theta", "startup_steps", "newmark_beta", "newmark_gamma"})
+    tracked = frozenset({"d_t", "d_tt"})
 
     def elements(self) -> dict[str, Any]:
         """Return DG P_deg (vector) for d and DG P_deg_p for p."""

@@ -5,6 +5,7 @@
     writer.save("results/run_fields.npz", model.problem)
     fl = load_fields("results/run_fields.npz")
     fl.function("p", 0), fl.average("cflux", 2.0, 3.0), fl.domain   # mesh in m, with its tags
+    restore("results/run_fields.npz", -1, ["d", "p"], model.domain)  # on the run's own mesh
 
 The file holds the mesh (vertices in m), its facet and cell tags with their names, and, for each
 quantity, the DG dofs of every cell at every saved time: the exact Function, not a sampling of it.
@@ -14,6 +15,11 @@ wrote it.
 
 The reloaded Domain is in SI (L0 = 1, coordinates in m), ghosted across shared facets, with the
 boundary and subdomain names it had. Facet tags need a mesh of degree 1.
+
+restore() puts saved quantities back on the mesh of a new run instead, to start from them. That
+mesh must be the saved one: the same cells in the same input order, each with the same vertices
+(within 1e-9 of the largest coordinate), on any number of ranks. Each cell then gets back its dofs
+as they were saved; another mesh is an error, never interpolated onto.
 """
 
 import json
@@ -283,3 +289,65 @@ class Fields:
 def load_fields(path: str | Path, comm: MPI.Comm = MPI.COMM_WORLD) -> Fields:
     """Return a saved fields file read back (see Fields)."""
     return Fields(path, comm)
+
+
+def _mesh_error(f: Any, mesh: dolfinx.mesh.Mesh) -> str | None:
+    """Return why the saved mesh is not this one by its sizes (rank 0), or None."""
+    tdim = mesh.topology.dim
+    saved = (f["cells"].shape[0], f["x"].shape[0], f["x"].shape[1], f["cells"].shape[1])
+    here = (
+        mesh.topology.index_map(tdim).size_global,
+        mesh.geometry.index_map().size_global,
+        mesh.geometry.dim,
+        mesh.geometry.dofmaps[0].shape[1],
+    )
+    if saved == here:
+        return None
+    return (
+        f"{saved[0]} cells, {saved[1]} nodes in {saved[2]}D ({saved[3]} per cell) saved; "
+        f"this mesh has {here[0]}, {here[1]} in {here[2]}D ({here[3]})"
+    )
+
+
+def restore(
+    path: str | Path, index: int, names: list[str], domain: Domain
+) -> dict[str, dolfinx.fem.Function]:
+    """Return saved quantities at saved time `index` as SI Functions on the domain's own mesh.
+
+    The file must hold the domain's mesh (see the module docstring), else ValueError. Each
+    Function is in DG of the saved degree, its cells' dofs copied from the file.
+    """
+    mesh, comm = domain.mesh, domain.mesh.comm
+    tdim, gdim = mesh.topology.dim, mesh.geometry.dim
+    nloc = mesh.topology.index_map(tdim).size_local
+    orig = comm.gather(np.asarray(mesh.topology.original_cell_index[:nloc], dtype=np.int64))
+    head, parts = None, None
+    if comm.rank == 0:
+        with np.load(path, allow_pickle=False) as f:
+            error = _mesh_error(f, mesh)
+            meta = {n: (int(f[f"{n}_deg"]), tuple(int(v) for v in f[f"{n}_shape"])) for n in names}
+            head = (error, meta, float(np.abs(f["x"]).max()))
+            if error is None:
+                x, cells = f["x"], f["cells"]
+                values = {n: f[n][index] for n in names}
+                parts = [(x[cells[o]], {n: v[o] for n, v in values.items()}) for o in orig]
+    error, meta, size = comm.bcast(head)
+    if error is not None:
+        raise ValueError(f"{path}: not the mesh of this run: {error}")
+    x_saved, values = comm.scatter(parts)
+    x_here = mesh.geometry.x[mesh.geometry.dofmaps[0][:nloc], :gdim] * domain.L0
+    moved = float(np.abs(x_here - x_saved).max(initial=0.0))
+    moved = comm.allreduce(moved, op=MPI.MAX)
+    if moved > 1e-9 * size:
+        raise ValueError(
+            f"{path}: not the mesh of this run: a cell vertex is {moved:.3g} m from the saved one"
+        )
+    out = {}
+    for name, (deg, shape) in meta.items():
+        V = dolfinx.fem.functionspace(mesh, ("DG", deg, shape))
+        u = dolfinx.fem.Function(V, name=name)
+        bs = V.dofmap.bs
+        u.x.array.reshape(-1, bs)[V.dofmap.list[:nloc]] = values[name].reshape(nloc, -1, bs)
+        u.x.scatter_forward()
+        out[name] = u
+    return out

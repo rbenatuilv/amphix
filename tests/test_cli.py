@@ -25,6 +25,7 @@ PUBLIC = [
     "System",
     "ThreeField",
     "TwoField",
+    "apply_initial",
     "brain",
     "build_domain",
     "load",

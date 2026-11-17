@@ -18,7 +18,18 @@ from amphix.config.validate import ConfigError
 from amphix.core import registry
 from amphix.core.units import Scales
 
-SHARED = ("scales", "mesh", "time", "output", "solver", "params", "loads", "boundaries", "sources")
+SHARED = (
+    "scales",
+    "mesh",
+    "time",
+    "output",
+    "solver",
+    "params",
+    "loads",
+    "boundaries",
+    "sources",
+    "initial",
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,7 @@ class Problem:
     loads: dict = field(default_factory=dict)
     boundaries: dict = field(default_factory=dict)
     sources: dict = field(default_factory=dict)
+    initial: sections.Initial | None = None  # None: start at rest
     sections: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -93,6 +105,7 @@ def from_dict(tree: dict, name: str = "problem", root: str | Path = ".") -> Prob
         loads=loads,
         boundaries=sections.boundaries(tree.get("boundaries", {}), model),
         sources=sections.sources(tree.get("sources", {}), model),
+        initial=sections.initial(tree.get("initial"), model, Path(root)),
         sections=own,
         raw=copy.deepcopy(tree),
     )
