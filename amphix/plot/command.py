@@ -2,8 +2,8 @@
 
 A run is a path to an .npz file, or a name: results/<run>_fields.npz for fields and
 results/<run>.npz for series, from the current directory. The figure goes to figures/ there:
-<run>_<fields>_t<t>.png (the snapshot's time), <run>_<fields>_avg<t0>-<t1>.png or
-<run>_<keys>_series.png, unless an output path is given.
+<run>_<fields>_t<t>.png (the snapshot's time), <run>_<fields>_avg<t0>-<t1>.png,
+<run>_<keys>_series.png or, animated, <run>_<field>.gif, unless an output path is given.
 """
 
 from pathlib import Path
@@ -15,6 +15,7 @@ from mpi4py import MPI
 
 from amphix.io.fields import load_fields
 from amphix.io.results import load_results
+from amphix.plot.animation import animate
 from amphix.plot.fields import field
 from amphix.plot.labels import PlotError, nearest
 from amphix.plot.series import key_unit, series
@@ -130,3 +131,20 @@ def plot_series(
         return save(fig, Path(out) if out else default, show)
     finally:
         plt.close(fig)
+
+
+def plot_gif(
+    run: str,
+    name: str,
+    *,
+    t_from: float | None = None,
+    t_to: float | None = None,
+    fps: int = 10,
+    out: str | Path | None = None,
+    **options: Any,
+) -> Path:
+    """Animate a field of a run over its snapshots in [t_from, t_to]; write a GIF (or an MP4)."""
+    path = find(run, "fields")
+    fl = load_fields(path, MPI.COMM_SELF)
+    default = FIGURES / f"{run_name(path)}_{name}.gif"
+    return animate(fl, name, Path(out) if out else default, t_from, t_to, fps, **options)

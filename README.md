@@ -88,11 +88,13 @@ amphix plot annulus p cflux --at 0.5                  # results/annulus_fields.n
 amphix plot annulus cflux --log --zoom 5.2e-3 6.2e-3 -5e-4 5e-4 --mesh --quiver 20
 amphix plot annulus d --component x --average 0 1     # mean over the snapshots in (0, 1]
 amphix plot annulus --series probe_p cbflux_pial      # results/annulus.npz, against t
+amphix plot annulus cflux --log --gif --from 1 --to 2 # figures/annulus_cflux.gif, one frame per snapshot
 ```
 
 The PNG goes to `figures/` (`--out` to choose, `--show` to open a window). `--cells` draws one
-colour per cell, `--vmin/--vmax` fix the colour scale. cflux (and cbflux) saved at t is the mean
-over the step ending at t, and is labelled so. The same from Python, on any matplotlib axes:
+colour per cell, `--vmin/--vmax` fix the colour scale; an animation keeps one scale for all its
+frames (`--out x.mp4` needs ffmpeg). cflux (and cbflux) saved at t is the mean over the step ending
+at t, and is labelled so. The same from Python, on any matplotlib axes:
 
 ```python
 import matplotlib.pyplot as plt
@@ -103,6 +105,7 @@ fig, (a1, a2, a3) = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
 plot.field(fl, "p", a1, t=0.5)  # returns a FieldPlot: .update(i) redraws
 plot.field(fl, "cflux", a2, t=0.5, log=True, quiver=20)
 plot.series(load_results("results/annulus.npz"), ["probe_p"], a3)
+plot.animate(fl, "p", "figures/p.gif", t_from=1.0, t_to=2.0, fps=10)
 ```
 
 ## Package layout

@@ -106,3 +106,14 @@ def nearest(fields: Any, t: float | None = None) -> int:
             stacklevel=2,
         )
     return i
+
+
+def between(fields: Any, t_from: float | None = None, t_to: float | None = None) -> list[int]:
+    """Return the indices of the snapshots with t_from <= t <= t_to (default: all of them)."""
+    snap_t = np.asarray(fields.snap_t)
+    lo = -np.inf if t_from is None else t_from - 1e-9 * max(1.0, abs(t_from))
+    hi = np.inf if t_to is None else t_to + 1e-9 * max(1.0, abs(t_to))
+    idx = np.flatnonzero((snap_t >= lo) & (snap_t <= hi)).tolist()
+    if not idx:
+        raise PlotError(f"{fields.path}: no snapshot in [{t_from}, {t_to}]")
+    return idx

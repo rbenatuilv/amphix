@@ -12,9 +12,11 @@ asks for (io.Recorder) and saves <root>/<output.dir>/<name>.npz (and <name>_fiel
     amphix plot annulus p cflux --at 0.5 --log --zoom 5.2e-3 6.2e-3 -5e-4 5e-4
     amphix plot annulus cflux --average 0 1 --quiver 20 --out figures/mean_q.png
     amphix plot annulus --series probe_p cbflux_pial
+    amphix plot annulus cflux --log --gif --from 1 --to 2 --fps 10
 
 `plot` reads results/<run>_fields.npz (fields) or results/<run>.npz (--series), or the .npz file
-given, and writes a PNG to figures/ (plot.command); it needs matplotlib and one process.
+given, and writes a PNG (--gif: an animation over the snapshots) to figures/ (plot.command); it
+needs matplotlib and one process.
 """
 
 import argparse
@@ -87,9 +89,14 @@ def _plot_parser(commands: Any) -> None:
     plot.add_argument("--quiver", type=int, metavar="N", help="about N direction arrows")
     plot.add_argument("--out", help="the output file (default: figures/...)")
     plot.add_argument("--show", action="store_true", help="also open a window")
+    plot.add_argument("--gif", action="store_true", help="animate one field over its snapshots")
+    plot.add_argument("--from", type=float, dest="t_from", metavar="T0", help="first frame [s]")
+    plot.add_argument("--to", type=float, dest="t_to", metavar="T1", help="last frame [s]")
+    plot.add_argument("--fps", type=int, help="frames per second (default 10)")
 
 
-FIELD_ONLY = ("at", "average", "log", "vmin", "vmax", "zoom", "cells", "mesh", "quiver")
+FIELD_ONLY = ("at", "average", "log", "vmin", "vmax", "zoom", "cells", "mesh", "quiver", "gif")
+GIF_ONLY = ("t_from", "t_to", "fps")
 
 
 def _plot(args: argparse.Namespace) -> int:
@@ -117,9 +124,13 @@ def _plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _flag(key: str) -> str:
+    return f"--{key.removeprefix('t_')}"  # t_from: --from
+
+
 def _draw(args: argparse.Namespace, command: Any) -> Path:
     if args.series:
-        given = [f"--{k}" for k in FIELD_ONLY if getattr(args, k) not in (None, False)]
+        given = [_flag(k) for k in FIELD_ONLY + GIF_ONLY if getattr(args, k) not in (None, False)]
         if args.fields or given:
             raise command.PlotError(f"--series: no fields or {', '.join(given or ['fields'])}")
         return command.plot_series(
@@ -127,6 +138,31 @@ def _draw(args: argparse.Namespace, command: Any) -> Path:
         )
     if not args.fields:
         raise command.PlotError("give the fields to draw, or --series KEY ...")
+    options = {
+        "component": args.component,
+        "log": args.log,
+        "vmin": args.vmin,
+        "vmax": args.vmax,
+        "zoom": tuple(args.zoom) if args.zoom else None,
+        "cells": args.cells,
+        "mesh": args.mesh,
+        "quiver": args.quiver,
+    }
+    if args.gif:
+        if len(args.fields) > 1 or args.at is not None or args.average or args.show:
+            raise command.PlotError("--gif: one field, without --at, --average or --show")
+        return command.plot_gif(
+            args.run,
+            args.fields[0],
+            t_from=args.t_from,
+            t_to=args.t_to,
+            fps=10 if args.fps is None else args.fps,
+            out=args.out,
+            **options,
+        )
+    given = [_flag(k) for k in GIF_ONLY if getattr(args, k) is not None]
+    if given:
+        raise command.PlotError(f"{', '.join(given)}: only with --gif")
     return command.plot_fields(
         args.run,
         args.fields,
@@ -134,14 +170,7 @@ def _draw(args: argparse.Namespace, command: Any) -> Path:
         average=tuple(args.average) if args.average else None,
         out=args.out,
         show=args.show,
-        component=args.component,
-        log=args.log,
-        vmin=args.vmin,
-        vmax=args.vmax,
-        zoom=tuple(args.zoom) if args.zoom else None,
-        cells=args.cells,
-        mesh=args.mesh,
-        quiver=args.quiver,
+        **options,
     )
 
 

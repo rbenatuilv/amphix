@@ -165,6 +165,11 @@ class FieldPlot:
         lo, hi = float(v.min()), float(v.max())
         return (max(lo, hi * 10.0**-DECADES), hi) if self.log else (lo, hi)
 
+    def set_limits(self, vmin: float, vmax: float) -> None:
+        """Fix the colour scale to [vmin, vmax] for every later update."""
+        self.fixed = (vmin, vmax)
+        self.image.set_clim(vmin, vmax)
+
     def update(self, what: int | dolfinx.fem.Function, title: str | None = None) -> None:
         """Redraw with snapshot `what` (an index) or a Function of this field; set the title."""
         f = self.function(what)

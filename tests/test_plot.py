@@ -12,6 +12,7 @@ import matplotlib
 import numpy as np
 import pytest
 from mpi4py import MPI
+from PIL import Image
 from test_hdiv import square
 
 import amphix.physics.poro  # noqa: F401
@@ -22,7 +23,9 @@ from amphix.core.model import make_model
 from amphix.io.fields import FieldWriter, load_fields
 from amphix.io.recorder import Recorder
 from amphix.io.results import load_results
-from amphix.plot import FieldPlot, Lattice, PlotError, field, series
+from amphix.plot import FieldPlot, Lattice, PlotError, animate, field, series
+from amphix.plot import animation as animation_module
+from amphix.plot import lattice as lattice_module
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -270,3 +273,73 @@ def test_fieldplot_updates(fl):
     fp.update(5)
     assert fp.triangulation is tri and not np.array_equal(first, fp.image.get_array())
     assert fp.ax.get_title() == "p, t = 0.25 s" and fp.image.norm.vmax == 1.0
+
+
+def test_animate(fl, tmp_path, monkeypatch):
+    """One frame per snapshot in [t_from, t_to], one colour scale, one triangulation."""
+    built, clims = [], []
+    monkeypatch.setattr(lattice_module, "_LATTICES", {})
+
+    class Counted(Lattice):
+        def __init__(self, *args, **kwargs):
+            built.append(args[1:])
+            super().__init__(*args, **kwargs)
+
+    update = FieldPlot.update
+
+    def recorded(self, what, title=None):
+        update(self, what, title)
+        clims.append((self.image.get_clim(), self.ax.get_title()))
+
+    monkeypatch.setattr(lattice_module, "Lattice", Counted)
+    monkeypatch.setattr(FieldPlot, "update", recorded)
+    path = animate(fl, "cflux", tmp_path / "a" / "q.gif", t_from=0.05, t_to=0.2, fps=5)
+    with Image.open(path) as im:
+        assert im.n_frames == 4
+    deg = fl.space("cflux").ufl_element().degree
+    assert built == [(deg, False)]  # one lattice, built once for the four frames
+    assert [title for _, title in clims] == [
+        f"cflux, step ending at t = {t} s" for t in (0.05, 0.1, 0.15, 0.2)
+    ]
+    assert len({clim for clim, _ in clims}) == 1
+    values = [FieldPlot(fl, "cflux").values(i) for i in (1, 2, 3, 4)]
+    lo, hi = clims[0][0]
+    assert lo == min(v.min() for v in values) and hi == max(v.max() for v in values)
+    clims.clear()
+    animate(fl, "p", tmp_path / "p.gif", vmin=-1.0, log=False)  # every snapshot, vmin fixed
+    assert len(clims) == 6 and {clim[0] for clim, _ in clims} == {-1.0}
+    assert len({clim for clim, _ in clims}) == 1
+
+
+def test_animate_writers(fl, tmp_path, monkeypatch):
+    with pytest.raises(PlotError, match="no snapshot in"):
+        animate(fl, "p", tmp_path / "p.gif", t_from=0.3)
+    with pytest.raises(PlotError, match=r"\.gif or an \.mp4"):
+        animate(fl, "p", tmp_path / "p.avi")
+    available = animation_module.animation.writers.is_available("ffmpeg")
+    monkeypatch.setattr(animation_module.animation.writers, "is_available", lambda name: False)
+    with pytest.raises(PlotError, match="needs ffmpeg"):
+        animate(fl, "p", tmp_path / "p.mp4")
+    if available:
+        monkeypatch.undo()
+        assert animate(fl, "p", tmp_path / "p.mp4", t_to=0.1).stat().st_size > 0
+
+
+def test_command_line_gif(run, monkeypatch, capsys):
+    monkeypatch.chdir(run)
+    assert main(["plot", "run", "cflux", "--gif", "--from", "0.1", "--log", "--fps", "4"]) == 0
+    with Image.open(run / "figures" / "run_cflux.gif") as im:
+        assert im.n_frames == 4
+    assert main(["plot", "run", "d", "--gif", "--out", "out/d.gif", "--component", "y"]) == 0
+    with Image.open(run / "out" / "d.gif") as im:
+        assert im.n_frames == 6
+    capsys.readouterr()
+    for argv, error in [
+        (["run", "p", "d", "--gif"], "--gif: one field, without --at, --average or --show"),
+        (["run", "p", "--gif", "--at", "0.1"], "--gif: one field, without --at, --average"),
+        (["run", "p", "--from", "0.1"], "--from: only with --gif"),
+        (["run", "--series", "probe_p", "--fps", "3"], "--series: no fields or --fps"),
+        (["run", "p", "--gif", "--to", "-1"], "no snapshot in [None, -1.0]"),
+    ]:
+        assert main(["plot", *argv]) == 2, argv
+        assert error in capsys.readouterr().err, argv
