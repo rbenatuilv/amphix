@@ -18,7 +18,7 @@
 ```bash
 conda create -n amphix -c conda-forge python=3.12 fenics-dolfinx=0.11 mpich python-gmsh pyyaml
 conda activate amphix
-pip install -e .
+pip install -e .            # pip install -e ".[plot]" for plotting (matplotlib)
 ```
 
 ## Usage
@@ -77,6 +77,34 @@ results = amphix.load_results("results/annulus.npz")  # {"probe_p": ..., "cbflux
 fields = amphix.load_fields("results/annulus_fields.npz")  # fields.function("cflux", i)
 ```
 
+## Plotting
+
+`amphix plot` draws a saved run, after it, from its files alone (it needs matplotlib). Lengths are
+in mm, everything else in SI; a DG field is drawn cell by cell on its Lagrange lattice, so P2
+detail and jumps between cells stay visible.
+
+```bash
+amphix plot annulus p cflux --at 0.5                  # results/annulus_fields.npz, nearest snapshot
+amphix plot annulus cflux --log --zoom 5.2e-3 6.2e-3 -5e-4 5e-4 --mesh --quiver 20
+amphix plot annulus d --component x --average 0 1     # mean over the snapshots in (0, 1]
+amphix plot annulus --series probe_p cbflux_pial      # results/annulus.npz, against t
+```
+
+The PNG goes to `figures/` (`--out` to choose, `--show` to open a window). `--cells` draws one
+colour per cell, `--vmin/--vmax` fix the colour scale. cflux (and cbflux) saved at t is the mean
+over the step ending at t, and is labelled so. The same from Python, on any matplotlib axes:
+
+```python
+import matplotlib.pyplot as plt
+from amphix import load_fields, load_results, plot
+
+fl = load_fields("results/annulus_fields.npz")
+fig, (a1, a2, a3) = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
+plot.field(fl, "p", a1, t=0.5)  # returns a FieldPlot: .update(i) redraws
+plot.field(fl, "cflux", a2, t=0.5, log=True, quiver=20)
+plot.series(load_results("results/annulus.npz"), ["probe_p"], a3)
+```
+
 ## Package layout
 
 | package | contents |
@@ -87,11 +115,12 @@ fields = amphix.load_fields("results/annulus_fields.npz")  # fields.function("cf
 | `amphix.post` | norms, integrals, point sampling, the H(div) reconstruction |
 | `amphix.io` | the `Recorder`, result and field files, ParaView output |
 | `amphix.brain` | brain parameter sets, cardiac waveforms and geometries |
+| `amphix.plot` | plots of saved fields and time series (matplotlib, optional) |
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,plot]"
 pre-commit install
 python -m pytest                          # fast tests
 python -m pytest -m "slow or not slow"    # all tests

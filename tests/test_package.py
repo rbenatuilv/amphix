@@ -6,7 +6,7 @@ import pytest
 
 import amphix
 
-LAYERS = ["core", "config", "physics", "post", "io", "brain"]
+LAYERS = ["core", "config", "physics", "post", "io", "brain", "plot"]
 
 
 def test_version():
