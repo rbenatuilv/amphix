@@ -12,9 +12,10 @@
 A field is drawn on its DG lattice (lattice.py), or one colour per cell with cells=True. A vector
 is drawn by its magnitude (component="mag", the default) or one component ("x", "y"), with
 optional direction arrows (quiver=N: about N arrows over the shown region, of equal length; the
-colour gives the magnitude). log=True draws a logarithmic colour scale and leaves the non-positive
-values out. zoom=(x0, x1, y0, y1) [m] shows only that region. Without vmin/vmax the colour scale
-spans the values in the shown region (log: at most DECADES decades below the largest).
+colour gives the magnitude). log=True draws a logarithmic colour scale, for magnitudes (their zeros
+are left out); a scalar or a component must then be positive everywhere it is shown.
+zoom=(x0, x1, y0, y1) [m] shows only that region. Without vmin/vmax the colour scale spans the
+values in the shown region (log: at most DECADES decades below the largest).
 """
 
 from typing import Any
@@ -32,6 +33,7 @@ from amphix.plot.labels import (
     label,
     nearest,
     reduce,
+    text,
     when,
 )
 from amphix.plot.lattice import MM, lattice
@@ -153,8 +155,21 @@ class FieldPlot:
         return what
 
     def values(self, what: int | dolfinx.fem.Function) -> np.ndarray:
-        """Return the plotted scalar at the lattice points (component or magnitude)."""
-        return reduce(self.lattice.values(self.function(what)), self.which)
+        """Return the plotted scalar at the lattice points (component or magnitude).
+
+        With log=True, a signed quantity (a scalar or a component) must be positive everywhere
+        in the shown region, else PlotError.
+        """
+        v = reduce(self.lattice.values(self.function(what)), self.which)
+        if self.log and self.which != "mag":
+            shown = v[self.shown] if self.shown.any() else v
+            if not (shown > 0).all():
+                name = text(self.name, component_name(self.which))
+                raise PlotError(
+                    f"log scales are for magnitudes: {name} is not positive everywhere "
+                    f"(min {np.nanmin(shown):.3g})"
+                )
+        return v
 
     def limits(self, values: np.ndarray) -> tuple[float, float] | None:
         """Return the automatic colour limits of these values over the shown region (or None)."""
@@ -174,7 +189,7 @@ class FieldPlot:
         """Redraw with snapshot `what` (an index) or a Function of this field; set the title."""
         f = self.function(what)
         v = self.values(f)
-        if self.log:
+        if self.log:  # a magnitude: its zeros are left out
             bad = ~(v > 0)
             v = np.ma.masked_array(v, bad)
             if not self.lattice.per_cell:  # leave out the sub-triangles that touch a masked value

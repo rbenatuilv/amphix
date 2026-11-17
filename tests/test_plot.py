@@ -67,10 +67,10 @@ def poly(x):
     return 1.0 + 2.0 * x[0] - 3.0 * x[1] + 0.5 * x[0] ** 2 - x[0] * x[1] + 2.0 * x[1] ** 2
 
 
-def write(path, deg, expr, jump=False):
+def write(path, deg, expr, jump=False, shape=()):
     """A fields file of one DG field `f` on a 2 m x 1 m rectangle (cell index added: jumps)."""
     domain = build({"shape": "rectangle", "corners": [[0, 0], [2, 1]], "n": [3, 2]})
-    V = dolfinx.fem.functionspace(domain.mesh, ("DG", deg))
+    V = dolfinx.fem.functionspace(domain.mesh, ("DG", deg, shape))
     f = dolfinx.fem.Function(V)
     f.interpolate(expr)
     if jump:
@@ -171,17 +171,34 @@ def test_components(fl):
 
 
 def test_log_scale(tmp_path):
-    """Non-positive values are left out; the automatic scale spans at most DECADES decades."""
-    fields = write(tmp_path / "f.npz", 1, lambda x: x[0] - 0.7)
+    """The zeros of a magnitude are left out; the automatic scale spans at most DECADES
+    decades. A signed quantity on a log scale must be positive where it is shown."""
+
+    def vector(x):  # zero at the vertices x = 0 and 2/3 (P1 interpolation)
+        return np.stack([np.maximum(x[0] - 0.7, 0.0), np.zeros_like(x[0])])
+
+    fields = write(tmp_path / "f.npz", 1, vector, shape=(2,))
     fp = field(fields, "f", log=True)
     v = fp.image.get_array()
-    assert np.array_equal(np.ma.getmaskarray(v), np.asarray(fp.triangulation.x) <= 700)
+    masked, x = np.ma.getmaskarray(v), np.asarray(fp.triangulation.x)
+    assert np.array_equal(masked, v.data <= 0)  # eval may give 1e-17 instead of 0 at x = 2/3
+    assert masked[x < 1].sum() >= (x < 600).sum() and not masked[x > 700].any()
     assert isinstance(fp.image.norm, matplotlib.colors.LogNorm)
     assert fp.image.norm.vmax == pytest.approx(1.3) and fp.image.norm.vmin >= 1.3e-6
     hidden = fp.triangulation.mask
     assert hidden.any() and not hidden.all()
     fixed = field(fields, "f", log=True, vmin=1e-3, vmax=2.0)
     assert (fixed.image.norm.vmin, fixed.image.norm.vmax) == (1e-3, 2.0)
+    with pytest.raises(PlotError, match=r"log scales are for magnitudes: f_x is not positive"):
+        field(fields, "f", log=True, component="x")  # zero on the left
+    signed = write(tmp_path / "g.npz", 1, lambda x: x[0] - 0.7)
+    with pytest.raises(PlotError, match=r"magnitudes: f is not positive everywhere \(min -0\.7\)"):
+        field(signed, "f", log=True)
+    assert field(signed, "f", log=True, zoom=(1.0, 2.0, 0.0, 1.0)).image.norm.vmax == pytest.approx(
+        1.3
+    )
+    positive = write(tmp_path / "h.npz", 1, lambda x: x[0] + 1.0)
+    assert field(positive, "f", log=True).image.norm.vmin == 1.0
 
 
 def test_zoom_and_arrows(tmp_path, fl):
@@ -219,7 +236,7 @@ def test_series(run):
 
 def test_command_line(run, monkeypatch, capsys):
     monkeypatch.chdir(run)
-    assert main(["plot", "run", "p", "cflux", "--at", "0.12", "--quiver", "9", "--log"]) == 0
+    assert main(["plot", "run", "p", "cflux", "--at", "0.12", "--quiver", "9"]) == 0
     out = capsys.readouterr()
     assert (run / "figures" / "run_p_cflux_t0.1.png").is_file()
     assert "saved figures/run_p_cflux_t0.1.png" in out.out
@@ -237,11 +254,13 @@ def test_command_line(run, monkeypatch, capsys):
         (["run", "p", "--component", "x"], "p is a scalar: it has no component x"),
         (["run", "cflux", "--component", "z"], "cflux: no component z on a 2D mesh"),
         (["run", "--series", "probe_p", "--log"], "--series: no fields or --log"),
+        (["run", "p", "--log"], "log scales are for magnitudes: p is not positive everywhere"),
         (["run"], "give the fields to draw, or --series KEY ..."),
         (["results/run.npz", "p"], "results/run.npz: not a fields file"),
     ]:
         assert main(["plot", *argv]) == 2, argv
-        assert capsys.readouterr().err.strip() == f"amphix plot: {error}", argv
+        err = capsys.readouterr().err.strip()
+        assert err.startswith(f"amphix plot: {error}") and "\n" not in err, argv
 
 
 def test_amphix_without_matplotlib(tmp_path):
@@ -306,8 +325,8 @@ def test_animate(fl, tmp_path, monkeypatch):
     lo, hi = clims[0][0]
     assert lo == min(v.min() for v in values) and hi == max(v.max() for v in values)
     clims.clear()
-    animate(fl, "p", tmp_path / "p.gif", vmin=-1.0, log=False)  # every snapshot, vmin fixed
-    assert len(clims) == 6 and {clim[0] for clim, _ in clims} == {-1.0}
+    animate(fl, "p", tmp_path / "p.gif", t_to=0.1, vmin=-1.0)  # from the first, vmin fixed
+    assert len(clims) == 3 and {clim[0] for clim, _ in clims} == {-1.0}
     assert len({clim for clim, _ in clims}) == 1
 
 
@@ -316,15 +335,19 @@ def test_animate_writers(fl, tmp_path, monkeypatch):
         animate(fl, "p", tmp_path / "p.gif", t_from=0.3)
     with pytest.raises(PlotError, match=r"\.gif or an \.mp4"):
         animate(fl, "p", tmp_path / "p.avi")
-    available = animation_module.animation.writers.is_available("ffmpeg")
     monkeypatch.setattr(animation_module.animation.writers, "is_available", lambda name: False)
     with pytest.raises(PlotError, match="needs ffmpeg"):
         animate(fl, "p", tmp_path / "p.mp4")
-    if available:
-        monkeypatch.undo()
-        assert animate(fl, "p", tmp_path / "p.mp4", t_to=0.1).stat().st_size > 0
 
 
+@pytest.mark.slow
+def test_animate_mp4(fl, tmp_path):
+    if not animation_module.animation.writers.is_available("ffmpeg"):
+        pytest.skip("no ffmpeg")
+    assert animate(fl, "p", tmp_path / "p.mp4", t_to=0.1).stat().st_size > 0
+
+
+@pytest.mark.slow
 def test_command_line_gif(run, monkeypatch, capsys):
     monkeypatch.chdir(run)
     assert main(["plot", "run", "cflux", "--gif", "--from", "0.1", "--log", "--fps", "4"]) == 0
