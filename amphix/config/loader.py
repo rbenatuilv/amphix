@@ -11,7 +11,7 @@ from its bases.
 
 Overrides (`--set KEY=VALUE`, or a dict from Python) replace one key each, by its dotted path, after
 the bases are merged; a missing path is created. Their values are read as YAML, so
-`--set 'output.fields=[p, cflux]'` gives a list.
+`--set 'output.fields.quantities=[p, cflux]'` gives a list.
 
 Numbers: PyYAML follows YAML 1.1, where a float needs a dot, so `1e-3` would be the string "1e-3".
 The loader also reads exponent-only numbers (1e-3, 2E5, as YAML 1.2 does) as floats.

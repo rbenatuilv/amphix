@@ -43,14 +43,15 @@ def write(path, tree):
 
 def test_end_to_end_from_yaml(tmp_path, capsys):
     """`amphix run` of an annulus YAML file, with --set and --name, gives the boundary flows at
-    every step and p at every snapshot of the same problem run step by step in Python."""
+    every step and p at every saved time of the same problem run step by step in Python."""
     tree = annulus("poro2", h=1e-3)
     path = write(tmp_path / "annulus.yaml", tree)
-    argv = ["run", str(path), "--name", "e2e", "--set", "output.fields=[p]"]
-    argv += ["--set", "output.snapshots={from: 0.01, to: 0.05}"]
+    argv = ["run", str(path), "--name", "e2e", "--set", "output.boundary_flux=raw"]
+    argv += ["--set", "output.fields={quantities: [p], at: {from: 0.01, to: 0.05}}"]
     assert main(argv) == 0
     out = capsys.readouterr().out
     assert "e2e: poro2" in out and "5 steps" in out and "saved" in out
+    assert "fields ['p'] at 5 times" in out  # the memory they take, before the run
     r = amphix.load_results(tmp_path / "results" / "e2e.npz")
     assert r["problem"]["output"]["name"] == "e2e"
     _, ref = run(from_dict(tree))
@@ -80,7 +81,7 @@ def test_run_from_a_script(tmp_path):
         "sources": {"fluid_source": {"waveform": "vascular_option1"}},
         "discretization": {"deg": 1},
         "time": {"T": 0.2, "dt": 0.1},
-        "output": {"probes": {"c": [5e-3, 5e-3]}},
+        "output": {"probes": {"points": {"c": [5e-3, 5e-3]}, "quantities": ["p"]}},
     }
     problem = amphix.load(write(tmp_path / "square.yaml", tree))
     path = amphix.run(problem, verbose=False)

@@ -128,6 +128,11 @@ class FieldWriter:
                 V.dofmap.list.shape[1] * V.dofmap.bs,
             )
 
+    def nbytes(self, ntimes: int) -> int:
+        """Return the memory [bytes] that ntimes calls hold until save() (on rank 0)."""
+        ncells = self.domain.mesh.topology.index_map(self.domain.dim).size_global
+        return 8 * ntimes * ncells * sum(width for _, _, width in self.meta.values())
+
     def __call__(self, t: float) -> None:
         """Store every field now (at time t [s])."""
         comm = self.domain.mesh.comm

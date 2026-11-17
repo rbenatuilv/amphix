@@ -2,7 +2,9 @@
 
     python inspect_run.py smoke_4e-5        reads results/smoke_4e-5_fields.npz
 
-The run must have saved its fields: add  --set 'output.fields=[p, cflux]'  to `amphix run`.
+The run must have saved its fields: add to `amphix run`
+    --set 'output.fields={quantities: [p, cflux], at: {every: 10}}'
+
 Values are taken at the cell centres (one colour per cell).
 """
 

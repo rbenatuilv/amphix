@@ -42,11 +42,14 @@ boundaries:
   pial: {pressure: 0, displacement: [0, 0]}
 discretization: {deg: 2}
 time: {T: 1.0, dt: 0.01, theta: 0.5}
-output:
-  probes: {left: [-5.0e-3, 0.0]}
-  series: [p, cflux]               # cflux: the conservative velocity
-  fields: [p, cflux]
-  snapshots: {from: 0.0, to: 1.0, every: 10}
+output:                           # nothing is recorded unless asked for
+  boundary_flux: conservative      # the flow through each boundary, every step
+  probes:                          # every step
+    points: {left: [-5.0e-3, 0.0]}
+    quantities: [p, cflux]         # cflux: the conservative velocity
+  fields:                          # at = a list of times [s], or {from, to, every (steps)}
+    quantities: [p, cflux]
+    at: {from: 0.0, to: 1.0, every: 10}
 ```
 
 Run it from the command line (in parallel with `mpirun -n 4 amphix run ...`):
@@ -70,7 +73,7 @@ for t in model.steps():
     p = model.quantity("p")  # SI dolfinx Functions
     u = cflux.compute()
 
-results = amphix.load_results("results/annulus.npz")  # {"probe_p": ..., "bflux_pial": ...}
+results = amphix.load_results("results/annulus.npz")  # {"probe_p": ..., "cbflux_pial": ...}
 fields = amphix.load_fields("results/annulus_fields.npz")  # fields.function("cflux", i)
 ```
 

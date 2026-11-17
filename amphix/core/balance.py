@@ -12,7 +12,8 @@ t^n -> t^{n+1}, through five methods built on its solver-unit state:
     fluid_gained(q)         the mass equation over the step without its flux part, tested with q
     flux_lifting(psi, dS)   the cell term L_K of the reconstruction (None if there is none)
 
-post.hdiv.Reconstruction depends only on this protocol. Everything is in solver units.
+post.hdiv.Reconstruction depends only on this protocol; balanced(model) says whether a model (or a
+model class) has its five methods. Everything is in solver units.
 """
 
 from typing import Any, Protocol
@@ -47,3 +48,11 @@ class Balance(Protocol):
     def flux_lifting(self, psi: Any, dS: Any) -> Any:
         """Return the lifting of the reconstruction's cell equations (a form), or None."""
         ...
+
+
+METHODS = ("trace_degree", "numerical_flux", "step_velocities", "fluid_gained", "flux_lifting")
+
+
+def balanced(model: Any) -> bool:
+    """Return True if a model, or a model class, has the methods of Balance."""
+    return all(callable(getattr(model, m, None)) for m in METHODS)

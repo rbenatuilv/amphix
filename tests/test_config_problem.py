@@ -20,7 +20,10 @@ TREE = {
     "boundaries": {"left": {"temperature": "g", "fixed": [0, 0]}, "right": {"heat_flux": 0}},
     "sources": {"heat_source": "1e-3 * x"},
     "time": {"T": 0.1, "dt": 0.01, "theta": 0.5},
-    "output": {"probes": {"c": [5e-3, 5e-3]}, "snapshots": {"from": 0.02, "to": 0.06, "every": 2}},
+    "output": {
+        "probes": {"points": {"c": [5e-3, 5e-3]}, "quantities": ["u"]},
+        "fields": {"quantities": ["u", "flux"], "at": {"from": 0.02, "to": 0.06, "every": 2}},
+    },
     "solver": {"mat_mumps_icntl_14": 100},
 }
 
@@ -37,9 +40,8 @@ def test_every_section():
         p.section("material").k == 2.0 and p.params == {"A": 3.0} and p.loads == {"g": "A * sin(t)"}
     )
     assert p.boundaries["left"]["temperature"] == "g" and p.solver == {"mat_mumps_icntl_14": 100}
-    assert isinstance(p.output, Output) and p.output.times(p.time) == pytest.approx(
-        [0.02, 0.04, 0.06]
-    )
+    assert isinstance(p.output, Output) and list(p.output.fields.steps) == [2, 4, 6]
+    assert p.output.probes.quantities == ("u",) and p.output.boundary_flux == ()
     with pytest.raises(KeyError, match="no section 'discretization'"):
         p.section("discretization")
 
@@ -104,8 +106,8 @@ def test_boundaries_may_come_from_code():
         ({"material": {}}, "material", r"missing \['k'\]"),
         ({"output": {"probe": {}}}, "output.probe", "unknown key"),
         (
-            {"output": {"snapshots": {"from": 0.1, "until": 0.2}}},
-            "output.snapshots.until",
+            {"output": {"jump": {"at": {"from": 0.1, "until": 0.2}}}},
+            "output.jump.at.until",
             "unknown key",
         ),
         ({"solver": {"ksp_type": ["gmres"]}}, "solver.ksp_type", "number or a string"),
@@ -143,3 +145,62 @@ def test_registry():
         registry.register(Other)
     with pytest.raises(KeyError, match="unknown model 'nope'"):
         registry.get("nope")
+
+
+def output(**blocks):
+    return problem(output=blocks).output
+
+
+def test_output_at():
+    """`at`: a list of times on the steps, or {from, to, every} with defaults t0, T and 1."""
+    assert output(jump={"at": [0.0, 0.031, 0.1]}).jump.steps == (0, 3, 10)
+    # within dt/2 of a step (dt = 0.01): that step, even just outside [t0, T]
+    assert output(jump={"at": [-0.0049, 0.0349, 0.1049]}).jump.steps == (0, 3, 10)
+    assert list(output(jump={"at": {}}).jump.steps) == list(range(11))
+    assert list(output(jump={"at": {"from": 0.05, "every": 3}}).jump.steps) == [5, 8]
+    assert output().blocks() == {} and output(jump={"at": [0.1]}).blocks().keys() == {"jump"}
+    assert output(boundary_flux=["raw"]).boundary_flux == ("raw",)
+    assert output(boundary_flux="none").boundary_flux == ()
+
+
+@pytest.mark.parametrize(
+    "blocks, path, match",
+    [
+        ({"lines": {"quantities": ["u"], "at": [0.1]}}, "output.lines", r"missing \['paths'\]"),
+        ({"fields": {"quantities": ["u"]}}, "output.fields", r"missing \['at'\]"),
+        ({"fields": {"quantities": ["u"], "at": 0.1}}, "output.fields.at", "a list of times"),
+        (
+            {"fields": {"quantities": ["u"], "at": [0.1, 0.5]}},
+            r"output.fields.at\[1\]",
+            r"0.5 s is 0.4 s from the nearest step \(t = 0.1 s\): more than dt/2",
+        ),
+        (
+            {"jump": {"at": {"from": -0.006}}},
+            r"output.jump.at.from",
+            r"nearest step \(t = 0 s\)",
+        ),
+        (
+            {"fields": {"quantities": ["u"], "at": {"from": 0.06, "to": 0.02}}},
+            "output.fields.at",
+            "from <= to",
+        ),
+        ({"fields": {"quantities": ["v"], "at": [0.1]}}, "output.fields.quantities", "'v'"),
+        ({"fields": {"quantities": ["cflux"], "at": [0.1]}}, "output.fields.quantities", "cflux"),
+        ({"fields": {"quantities": [], "at": [0.1]}}, "output.fields.quantities", "a list"),
+        ({"fields": {"quantities": ["u"], "at": [0.1], "n": 3}}, "output.fields.n", "unknown"),
+        ({"probes": {"points": {"c": [0, 0]}}}, "output.probes", r"missing \['quantities'\]"),
+        (
+            {"slices": {"quantities": ["u"], "at": [0.1], "planes": {}}},
+            "output.slices",
+            "not for a 2D mesh",
+        ),
+        ({"grid": {"n": 0, "quantities": ["u"], "at": [0.1]}}, "output.grid.n", "positive"),
+        ({"boundary_flux": True}, "output.boundary_flux", "none, raw, conservative"),
+        ({"boundary_flux": "both"}, "output.boundary_flux", "none, raw, conservative"),
+        ({"boundary_flux": "conservative"}, "output.boundary_flux", "no step balance"),
+        ({"series": ["p"]}, "output.series", "unknown key"),
+    ],
+)
+def test_output_errors(blocks, path, match):
+    with pytest.raises(ConfigError, match=rf"^{path}: .*{match}"):
+        output(**blocks)

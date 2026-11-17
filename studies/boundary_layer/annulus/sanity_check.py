@@ -5,8 +5,8 @@ import numpy as np
 A = 66.65  # Pa, amplitude of pc = A sin(2 pi t)
 r = np.load("results/smoke_4e-5.npz")
 
-ts = r["snap_t"]
-i = np.argmax(np.sin(2 * np.pi * ts))  # the stored snapshot closest to the pulse peak
+ts = r["lines_t"]
+i = np.argmax(np.sin(2 * np.pi * ts))  # the stored line time closest to the pulse peak
 pc = A * np.sin(2 * np.pi * ts[i])
 print(f"t = {ts[i]:.2f} s   pc = {pc:.2f} Pa")
 

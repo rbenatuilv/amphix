@@ -13,6 +13,7 @@ What config/ reads from a registered class, without importing any physics (`Regi
     time_keys        the optional `time` keys it reads (e.g. theta, startup_steps); the others warn
     fields, tracked  its state (`initial` keys): the fields and the other tracked state (d_t, d_tt)
     restarts         whether `initial` may name a fields file
+    quantities       its derived quantities (flux, ...), which `output` may record
 """
 
 from collections.abc import Mapping, Sequence
@@ -30,6 +31,7 @@ class Registered(Protocol):
     fields: ClassVar[Mapping[str, Any]]
     tracked: ClassVar[frozenset[str]]
     restarts: ClassVar[bool]
+    quantities: ClassVar[Mapping[str, Any]]
 
 
 MODELS: dict[str, Any] = {}

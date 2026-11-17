@@ -42,13 +42,16 @@ def run(problem: Any, verbose: bool = True) -> Path | None:
             f"{problem.time.nsteps} steps (setup {time.perf_counter() - start:.1f} s)",
             flush=True,
         )
+    recorder = Recorder(model)
+    if talk and recorder.fields is not None:
+        names, n = list(problem.output.fields.quantities), len(problem.output.fields.steps)
+        print(f"  fields {names} at {n} times: {recorder.fields_bytes() / 1e6:.3g} MB in memory")
     every = max(1, problem.time.nsteps // 10)
 
     def progress(m: Any) -> None:
         if talk and m.n > 0 and m.n % every == 0:
             print(f"  t = {m.t:.4g} s  ({time.perf_counter() - start:.1f} s)", flush=True)
 
-    recorder = Recorder(model)
     model.run([recorder, progress])
     path = recorder.save()
     if talk:

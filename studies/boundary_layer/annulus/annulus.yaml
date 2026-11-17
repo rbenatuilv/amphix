@@ -20,8 +20,10 @@ boundaries:
 discretization: {deg: 2, deg_p: 1}
 time: {T: 5.0, dt: 0.01, theta: 0.5}
 output:
-  lines:                                    # radial lines on the x axis, ~5 um spacing
-    thick: {from: [-1.0e-2, 0.0], to: [5.0e-4, 0.0], n: 2101}
-    thin: {from: [5.5e-3, 0.0], to: [1.0e-2, 0.0], n: 901}
-  series: [p, cflux]
-  snapshots: {from: 4.0, to: 5.0, every: 1}  # every step of the last cycle
+  boundary_flux: conservative
+  lines:
+    quantities: [p, cflux]
+    at: {from: 4.0, to: 5.0, every: 1}      # every step of the last cycle
+    paths:                                  # radial lines on the x axis, ~5 um spacing
+      thick: {from: [-1.0e-2, 0.0], to: [5.0e-4, 0.0], n: 2101}
+      thin: {from: [5.5e-3, 0.0], to: [1.0e-2, 0.0], n: 901}

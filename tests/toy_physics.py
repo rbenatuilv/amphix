@@ -39,6 +39,9 @@ class ToyA:
     )
     source_kinds = (SourceKind("heat_source"),)
     time_keys = frozenset({"theta", "startup_steps"})
+    fields: ClassVar[dict] = {"u": None}
+    tracked = frozenset()
+    quantities: ClassVar[dict] = {"flux": None}  # no step balance: no cflux
 
 
 class ToyB(ToyA):

@@ -14,8 +14,8 @@ from mpi4py import MPI
 import amphix.physics.poro  # noqa: F401
 from amphix.config import from_dict
 from amphix.core.model import make_model
-from amphix.io.fields import FieldWriter
 from amphix.io.initial import apply_initial
+from amphix.io.recorder import Recorder
 from amphix.post.integrals import BoundaryIntegrals
 
 MATERIAL = {"lambda": 1.0, "mu": 1.0, "alpha": 1.0, "c0": 1.0, "K": 1.0, "muF": 1.0, "rho": 1.0}
@@ -59,14 +59,14 @@ def state(model):
 
 
 def steady(folder):
-    """One backward-Euler step of 1e9 s, saving d and p; return the fields file and the flows."""
-    path = Path(folder) / "steady_fields.npz"
-    model = make_model(problem(STEADY))
-    model.step()
-    writer = FieldWriter(model.domain, {f: (lambda f=f: model.quantity(f)) for f in ("d", "p")})
-    writer(model.t)
-    writer.save(path, model.problem)
-    return path, flows(model)
+    """One backward-Euler step of 1e9 s, its d and p saved by the Recorder as `amphix run` does;
+    return the fields file and the flows."""
+    fields = {"quantities": ["d", "p"], "at": [STEADY["T"]]}
+    model = make_model(problem(STEADY, root=folder, output={"name": "steady", "fields": fields}))
+    rec = Recorder(model)
+    model.run([rec])
+    rec.save()
+    return Path(folder) / "results" / "steady_fields.npz", flows(model)
 
 
 def restart(path):
