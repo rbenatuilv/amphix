@@ -11,6 +11,7 @@ Problem.raw); data given in code is not in it. Only plain arrays are stored, so 
 with numpy alone (no pickle).
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,18 +29,33 @@ def save_results(path: str | Path, arrays: dict[str, Any], problem: Any) -> Path
     """Write arrays and the problem tree to an .npz on rank 0; return the path on every rank."""
     if "problem" in arrays:  # on every rank, before the rank-0 write
         raise ValueError("save_results: 'problem' is reserved for the problem tree")
-    comm = MPI.COMM_WORLD
-    if comm.rank == 0:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(target: Path) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
         data = {k: np.asarray(v) for k, v in arrays.items()}
-        np.savez(path, **data, problem=problem_text(problem))
-    return written(path, comm)
+        np.savez(target, **data, problem=problem_text(problem))
+
+    return written(path, MPI.COMM_WORLD, write)
 
 
-def written(path: str | Path, comm: MPI.Comm) -> Path:
-    """Return rank 0's path on every rank, once rank 0 has written it (the broadcast waits)."""
-    return Path(comm.bcast(str(path), root=0))
+def written(path: str | Path, comm: MPI.Comm, write: Callable[[Path], None]) -> Path:
+    """Run write(path) on rank 0; return rank 0's path on every rank once it is written.
+
+    The broadcast makes the other ranks wait for the file. If the write fails, rank 0 re-raises
+    its error and the other ranks raise a RuntimeError with rank 0's message, instead of waiting.
+    """
+    path = Path(path)
+    if comm.rank == 0:
+        try:
+            write(path)
+        except BaseException as e:
+            comm.bcast(("failed", f"{type(e).__name__}: {e}"), root=0)
+            raise
+        return Path(comm.bcast(("written", str(path)), root=0)[1])
+    status, value = comm.bcast(None, root=0)
+    if status == "failed":
+        raise RuntimeError(f"saving {path} failed on rank 0: {value}")
+    return Path(value)
 
 
 def load_results(path: str | Path) -> dict[str, Any]:

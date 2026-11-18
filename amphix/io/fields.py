@@ -151,10 +151,7 @@ class FieldWriter:
 
     def save(self, path: str | Path, problem: Any) -> Path:
         """Write the file (rank 0); return its path on every rank once it is written."""
-        comm = self.domain.mesh.comm
-        if comm.rank == 0:
-            self._write(Path(path), problem)
-        return written(path, comm)
+        return written(path, self.domain.mesh.comm, lambda target: self._write(target, problem))
 
     def _write(self, path: Path, problem: Any) -> None:
         """Write the file (rank 0 holds the data)."""
