@@ -125,6 +125,16 @@ plot.animate(fl, "p", "figures/p.gif", t_from=1.0, t_to=2.0, fps=10)
 ```bash
 pip install -e ".[dev,plot]"
 pre-commit install
-python -m pytest                          # fast tests
-python -m pytest -m "slow or not slow"    # all tests
 ```
+
+## Tests
+
+```bash
+python -m pytest                                        # the fast tests (about a minute)
+python -m pytest -m "slow or not slow"                  # all tests
+mpirun -n 2 python -m pytest -m "slow or not slow"      # all tests, on two ranks
+```
+
+Tests longer than about 10 s are marked `slow` and left out by default. Under `mpirun` the tests
+that are serial by design are skipped, with the reason (`-rs` lists them): the ones that compare
+themselves with their own `mpirun` run, and the plots, which are drawn on one process.
