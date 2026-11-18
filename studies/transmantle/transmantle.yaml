@@ -1,8 +1,9 @@
-# Mean transmantle difference plus an oscillation: pv = gamma + dP cos(2 pi t), p = 0 at the pia.
-# dP = 194.6 Pa/m x 7.5 mm (cardiac transmantle gradient); gamma = dP / 5.
-# pc is constant, so it is set to 0: with alpha = 1 a uniform pressure moves no fluid.
-# The oscillation starts as a cosine: a sine has a net push over its first cycle, which leaves
-# a slowly decaying drainage transient.
+# Mean transmantle difference plus an oscillation: pv = pc + gamma + dP sin(2 pi t) at the
+# ventricle, pc at the pia. pc is constant, so it is set to 0: with alpha = 1 a uniform pressure
+# moves no fluid. dP = 194.6 Pa/m x 7.5 mm (cardiac transmantle gradient); gamma = dP / 5.
+#   case 1: dP = 0 (gamma only)      amphix run transmantle.yaml --set params.dP=0 --name case1
+#   case 2: gamma + dP sin           amphix run transmantle.yaml --name case2
+# 5 periods; the last two (3-5 s) are averaged.
 model: poro2
 scales: {L0: 1.0e-2, T0: 1.0, P0: 1.0}
 mesh:
@@ -15,11 +16,14 @@ mesh:
 material: {preset: cvr22}
 params: {gamma: 0.292, dP: 1.4595}                   # Pa
 loads:
-  pv: "gamma + dP * cos(2*pi*t)"
+  pv: "gamma + dP * sin(2*pi*t)"
 boundaries:
   ventricle: {pressure: pv, normal_traction: "-pv"}
   pial: {pressure: 0, displacement: [0, 0]}
 discretization: {deg: 2, deg_p: 1}
 time: {T: 5.0, dt: 0.01, theta: 0.5}
 output:
-  boundary_flux: conservative
+  boundary_flux: conservative                        # flow through each wall, every step
+  fields:                                            # every step of the last two periods
+    quantities: [p, cflux]
+    at: {from: 3.0, to: 5.0, every: 1}
