@@ -1,56 +1,79 @@
-"""Fluid volume through the ventricle and the pia over the last two periods of each run.
+"""Fluid through the ventricle and the pia: flow over time and volume over the last two periods.
 
-Reads results/<run>.npz for the runs in RUNS, made from transmantle.yaml with
+Reads results/case1.npz and results/case2.npz (see transmantle.yaml). cbflux_<wall> is the
+outward flow per unit depth [m^2/s], averaged over each step; summed times dt over the steps of
+the window it gives the volume per unit depth [m^2]. Inflow at the ventricle is minus its
+outward volume, outflow at the pia its outward volume; their difference is the fluid stored.
 
-    amphix run transmantle.yaml --set params.dP=0 --set time.T=1e9 --set time.dt=1e9 \
-        --set time.theta=1 --set 'output.fields={quantities: [d, p], at: [1e9]}' --name steady
-    amphix run transmantle.yaml --set params.dP=0 \
-        --set 'initial={from: results/steady_fields.npz}' --name mean
-    amphix run transmantle.yaml --set 'initial={from: results/steady_fields.npz}' --name osc
-
-cbflux_<wall> is the outward flow per unit depth [m^2/s], averaged over each step; summing it
-times dt over the steps of the window gives the volume per unit depth [m^2]. Inflow at the
-ventricle is minus its outward volume; outflow at the pia is its outward volume; their
-difference is the fluid stored. Each run is also compared with `mean` (gamma only).
+Figure: figures/volumes.png. Top: the flow through each wall against t, the window shaded.
+Bottom: the volumes over the window, per case.
 """
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 
-RUNS = ["steady", "mean", "osc"]
-WINDOW = 2.0  # s: the last two periods of each run
+import amphix
 
-# steady flow through an eccentric annulus (bipolar coordinates), per unit depth [m^2/s]
-kappa = 1e-16 / 0.8e-3
-R1, R2, e = 2.5e-3, 1.0e-2, 3.0e-3
-gamma = 0.292
-Q_steady = 2 * np.pi * kappa * gamma / np.arccosh((R1**2 + R2**2 - e**2) / (2 * R1 * R2))
+RUNS = {"case1": "case 1: gamma only", "case2": "case 2: gamma + dP sin"}
+T0, T1 = 3.0, 5.0  # the last two periods [s]
 
 
-def volumes(path):
-    """Return (inflow at the ventricle, outflow at the pia) over the window [m^2]."""
-    r = np.load(path)
-    t = r["t"]
+def flows(r):
+    """Return t and the flows [m^2/s]: into the tissue at the ventricle, out of it at the pia."""
+    return r["t"], -r["cbflux_ventricle"], r["cbflux_pial"]
+
+
+def volumes(r):
+    """Return (inflow at the ventricle, outflow at the pia) over (T0, T1] [m^2]."""
+    t, q_in, q_out = flows(r)
     dt = t[-1] - t[-2]
-    if dt > WINDOW:  # steady run: one huge implicit step, its last flows are the steady values
-        return -r["cbflux_ventricle"][-1] * WINDOW, r["cbflux_pial"][-1] * WINDOW
-    w = t > t[-1] - WINDOW + 1e-9  # steps ending in (T - WINDOW, T]
-    return -r["cbflux_ventricle"][w].sum() * dt, r["cbflux_pial"][w].sum() * dt
+    w = (t > T0 + 1e-9) & (t < T1 + 1e-9)  # steps ending in (T0, T1]
+    return q_in[w].sum() * dt, q_out[w].sum() * dt
 
 
 if __name__ == "__main__":
     HERE = Path(__file__).parent
-    print(f"analytic steady: {Q_steady * WINDOW:.3e} m^2 per unit depth over {WINDOW:.0f} s")
-    print(f"{'run':>10} {'in (ventricle)':>15} {'out (pia)':>12} {'stored':>12}")
-    res = {}
-    for name in RUNS:
-        path = HERE / "results" / f"{name}.npz"
-        if path.exists():
-            v_in, v_out = res[name] = volumes(path)
-            print(f"{name:>10} {v_in:15.3e} {v_out:12.3e} {v_in - v_out:12.3e}")
-    if "mean" in res:
-        print("difference from mean (effect of the oscillation):")
-        for name in res.keys() - {"mean", "steady"}:
-            d_in, d_out = (res[name][i] - res["mean"][i] for i in (0, 1))
-            print(f"{name:>10} in {d_in:.3e}, out {d_out:.3e}")
+    (HERE / "figures").mkdir(exist_ok=True)
+    res = {k: amphix.load_results(HERE / "results" / f"{k}.npz") for k in RUNS}
+
+    print(f"volumes over ({T0:g}, {T1:g}] s, per unit depth [m^2]")
+    print(f"{'':>26} {'in (ventricle)':>15} {'out (pia)':>12} {'in - out':>12}")
+    vols = {}
+    for k, label in RUNS.items():
+        v_in, v_out = vols[k] = volumes(res[k])
+        print(f"{label:>26} {v_in:15.3e} {v_out:12.3e} {v_in - v_out:12.3e}")
+
+    fig = plt.figure(figsize=(12, 8), layout="constrained")
+    top = fig.subfigures(2, 1, height_ratios=[1, 1])
+    ax_v, ax_p = top[0].subplots(1, 2, sharex=True)
+    for ax, i, title in (
+        (ax_v, 1, "into the tissue at the ventricle"),
+        (ax_p, 2, "out at the pia"),
+    ):
+        for k, label in RUNS.items():
+            f = flows(res[k])
+            ax.plot(f[0], f[i], label=label)
+        ax.axvspan(T0, T1, color="0.9", zorder=0)
+        ax.axhline(0, color="0.5", lw=0.6)
+        ax.set(title=f"flow {title}", xlabel="t [s]", ylabel="[m^2/s per unit depth]")
+        ax.legend(fontsize=8)
+
+    ax = top[1].subplots()
+    bars = ["in (ventricle)", "out (pia)", "in - out (stored)"]
+    x = np.arange(len(bars))
+    width = 0.8 / len(RUNS)
+    for j, (k, label) in enumerate(RUNS.items()):
+        v_in, v_out = vols[k]
+        b = ax.bar(
+            x + (j - (len(RUNS) - 1) / 2) * width, [v_in, v_out, v_in - v_out], width, label=label
+        )
+        ax.bar_label(b, fmt="%.2e", fontsize=8)
+    ax.axhline(0, color="0.5", lw=0.6)
+    ax.set_xticks(x, bars)
+    ax.set(
+        title=f"volume over the last two periods ({T0:g}-{T1:g} s)", ylabel="[m^2 per unit depth]"
+    )
+    ax.legend(fontsize=8)
+    fig.savefig(HERE / "figures" / "volumes.png", dpi=150)

@@ -198,7 +198,7 @@ def test_log_scale(tmp_path):
         1.3
     )
     positive = write(tmp_path / "h.npz", 1, lambda x: x[0] + 1.0)
-    assert field(positive, "f", log=True).image.norm.vmin == 1.0
+    assert field(positive, "f", log=True).image.norm.vmin == pytest.approx(1.0)
 
 
 def test_zoom_and_arrows(tmp_path, fl):

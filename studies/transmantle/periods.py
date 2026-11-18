@@ -1,13 +1,18 @@
-"""Net volume per period added by the oscillation, against the period number.
+"""The start-up residual of the oscillation, period by period.
 
-Reads results/steady.npz and the oscillating runs in RUNS (e.g. made with time.T = 20, see
-volumes.py for the commands). For each period k = 1, 2, ... it sums the outward flow of each
-wall over (k - 1, k] s and subtracts the steady volume of one period: what is left is the net
-effect of the oscillation in that period. A start-up artefact decays as a power of k (about
--3/2 for a sine start, -5/2 for a cosine start); a real effect would level off.
+Case 2 started from the steady state of gamma, run for 20 periods (see transmantle.yaml):
 
-Figure: figures/periods.png (absolute values, log-log; open markers where the value is
-negative).
+    amphix run transmantle.yaml --set time.T=20 \
+        --set 'initial={from: results/steady_fields.npz}' --name case2_20
+
+For each period k it sums the outward flow of each wall over (k - 1, k] s and subtracts the steady
+volume of one period (results/steady.npz): what is left is the net effect of the oscillation in
+that period. A start-up residual decays with k (as k^-3/2 for a sine start); a real net effect
+would level off at a value of its own.
+
+Figure: figures/periods.png. Top: the raw net volume of each period from period K_FIRST on, with
+the steady value (case 1). Bottom, every period: its difference from the steady value (absolute
+values, log-log; open markers where the difference is negative).
 """
 
 from pathlib import Path
@@ -15,58 +20,67 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-RUNS = {"osc_sin20": "sin start", "osc_cos20": "cos start"}
-WALLS = {"ventricle": -1, "pial": 1}  # sign: inflow at the ventricle, outflow at the pia
+import amphix
+
+RUN = "case2_20"
+WALLS = {"ventricle": ("into the tissue at the ventricle", -1), "pial": ("out at the pia", 1)}
+SLOPE = -1.5  # decay of the residual of a sine start
+K_FIRST = 4  # top row: the first period shown (the earliest ones would squash the scale)
 
 
-def steady_flow(path):
-    """Return the steady outward flows {wall: m^2/s} of the one-step steady run."""
-    r = np.load(path)
-    return {w: r[f"cbflux_{w}"][-1] for w in WALLS}
-
-
-def per_period(path, steady):
-    """Return the period numbers and {wall: net volume per period minus the steady one}."""
-    r = np.load(path)
+def per_period(r, steady):
+    """Return the periods k and {wall: net volume of period k minus the steady one} [m^2]."""
     t = r["t"]
     dt = t[-1] - t[-2]
     k = np.arange(1, round(t[-1]) + 1)
     out = {}
-    for w, sign in WALLS.items():
-        q = r[f"cbflux_{w}"]
-        v = [q[(t > j - 1 + 1e-9) & (t < j + 1e-9)].sum() * dt - steady[w] for j in k]
-        out[w] = sign * np.array(v)
+    for w, (_, sign) in WALLS.items():
+        q = sign * r[f"cbflux_{w}"]
+        v = np.array([q[(t > j - 1 + 1e-9) & (t < j + 1e-9)].sum() * dt for j in k])
+        out[w] = v - steady[w]
     return k, out
 
 
 if __name__ == "__main__":
     HERE = Path(__file__).parent
     (HERE / "figures").mkdir(exist_ok=True)
-    steady = steady_flow(HERE / "results" / "steady.npz")
-    v_steady = abs(steady["pial"])  # steady volume of one period [m^2]
+    s = amphix.load_results(HERE / "results" / "steady.npz")
+    steady = {w: sign * s[f"cbflux_{w}"][-1] for w, (_, sign) in WALLS.items()}  # 1 s = 1 period
+    k, dv = per_period(amphix.load_results(HERE / "results" / f"{RUN}.npz"), steady)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
-    for (w, _sign), ax in zip(WALLS.items(), axes, strict=True):
-        for i, (name, label) in enumerate(RUNS.items()):
-            path = HERE / "results" / f"{name}.npz"
-            if not path.exists():
-                continue
-            k, dv = per_period(path, steady)
-            dv = dv[w]
-            neg = dv < 0
-            ax.loglog(k, np.abs(dv), "-", color=f"C{i}", label=label)
-            ax.loglog(k[~neg], dv[~neg], "o", color=f"C{i}")
-            ax.loglog(k[neg], -dv[neg], "o", mfc="none", color=f"C{i}")
-            print(f"{name} {w}: " + " ".join(f"{x:.2e}" for x in dv))
-            slope = -1.5 if "sin" in name else -2.5
-            ref = abs(dv[-1]) * (k / k[-1]) ** slope
-            ax.loglog(k, ref, ":", color=f"C{i}", label=f"slope {slope}")
-        ax.axhline(v_steady, color="0.5", lw=0.8, label="steady volume per period")
-        ax.set(
-            title={"ventricle": "ventricle (inflow)", "pial": "pia (outflow)"}[w],
-            xlabel="period k",
+    print(f"steady volume per period: {steady['pial']:.3e} m^2 per unit depth")
+    print(f"{'k':>3} {'ventricle':>11} {'pia':>11}")
+    for i, j in enumerate(k):
+        print(f"{j:3d} {dv['ventricle'][i]:11.3e} {dv['pial'][i]:11.3e}")
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), layout="constrained")
+    for col, (w, (title, _)) in enumerate(WALLS.items()):
+        # top: the raw net volume of each period, converging to the steady value
+        ax = axes[0, col]
+        shown = k >= K_FIRST
+        ax.plot(
+            k[shown],
+            steady[w] + dv[w][shown],
+            "o-",
+            color="C1",
+            label="case 2, net volume of period k",
         )
-    axes[0].set_ylabel("|net volume per period - steady| [m^2 per unit depth]")
-    axes[1].legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(HERE / "figures" / "periods.png", dpi=120)
+        ax.axhline(steady[w], color="C0", lw=1.2, label="case 1 (steady)")
+        ax.axhline(0, color="0.5", lw=0.6)
+        ax.set(title=f"flow {title}", xlabel="period k")
+
+        # bottom: its difference from the steady value, log-log
+        ax = axes[1, col]
+        v = dv[w]
+        neg = v < 0
+        ax.loglog(k, np.abs(v), "-", color="C1", label="case 2 - case 1")
+        ax.loglog(k[~neg], v[~neg], "o", color="C1")
+        ax.loglog(k[neg], -v[neg], "o", mfc="none", color="C1")
+        ax.loglog(k, abs(v[-1]) * (k / k[-1]) ** SLOPE, ":", color="k", label=f"k^{SLOPE}")
+        ax.axhline(steady["pial"], color="0.5", lw=0.8, label="steady volume per period")
+        ax.set(xlabel="period k")
+    axes[0, 0].set_ylabel("net volume of period k [m^2 per unit depth]")
+    axes[1, 0].set_ylabel("|case 2 - case 1| [m^2 per unit depth]")
+    axes[0, 1].legend(fontsize=8)
+    axes[1, 1].legend(fontsize=8)
+    fig.savefig(HERE / "figures" / "periods.png", dpi=150)
