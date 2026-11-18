@@ -21,13 +21,16 @@ Case (the vascular source run): the brain annulus, cvr22, stable pairs, the vasc
 g(t) (option 2) over one cardiac cycle, p = 0 on both surfaces, the pial surface fixed, the
 ventricle free.
 
-Output: balance.png, and the worst values over the cycle, printed.
+Output: balance.png, and the worst values over the cycle, printed. Runs in parallel too (mpirun):
+each rank balances its owned cells, the totals and maxima are reduced over the ranks, and rank 0
+prints and draws.
 """
 
 import dolfinx
 import matplotlib.pyplot as plt
 import numpy as np
 import ufl
+from mpi4py import MPI
 
 import amphix  # noqa: F401 (registers poro2 and poro3, and the brain presets and waveforms)
 from amphix.brain import geometries
@@ -71,8 +74,10 @@ def problem(model):
 
 # ---- the balance of every cell, for one velocity -------------------------------------------------
 def per_cell(form):
-    """Assemble a form linear in a DG0 test function: one value per cell."""
-    return dolfinx.fem.assemble_vector(dolfinx.fem.form(form)).array
+    """Assemble a form linear in a DG0 test function: one value per owned cell."""
+    vec = dolfinx.fem.assemble_vector(dolfinx.fem.form(form))
+    vec.scatter_reverse(dolfinx.la.InsertMode.add)  # facet terms assembled by the next rank
+    return vec.array[: vec.index_map.size_local]
 
 
 def imbalance(m, u, v, n):
@@ -86,7 +91,10 @@ if __name__ == "__main__":
     import pathlib
 
     HERE = pathlib.Path(__file__).parent
-    (HERE / "figures").mkdir(exist_ok=True)
+    comm = MPI.COMM_WORLD
+    root = comm.rank == 0
+    if root:
+        (HERE / "figures").mkdir(exist_ok=True)
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
     for ax, model in zip(axes, PAIRS, strict=True):
@@ -104,11 +112,14 @@ if __name__ == "__main__":
                 abs(ufl.inner(u_rt("+"), n("+"))) * (v("+") + v("-")) * ufl.dS
                 + abs(ufl.inner(u_rt, n)) * v * ufl.ds
             )
+            flow = comm.allreduce(through.sum(), op=MPI.SUM)
             times.append(t)
             for name, u in (("raw", u_raw), ("RT", u_rt)):
                 e = np.abs(imbalance(m, u, v, n))
-                total[name].append(e.sum() / through.sum())
-                worst[name].append(np.max(e / through))
+                total[name].append(comm.allreduce(e.sum(), op=MPI.SUM) / flow)
+                worst[name].append(comm.allreduce(np.max(e / through), op=MPI.MAX))
+        if not root:
+            continue
         print(f"\n{tag}: {m.system.ndofs} dofs, {len(times)} steps; worst over the cycle")
         # raw drawn thick: visible under RT where they coincide (3F)
         for name, color, lw in zip(names, ("tab:red", "tab:blue"), (4, 1.5), strict=True):
@@ -118,8 +129,9 @@ if __name__ == "__main__":
             ax.semilogy(times, worst[name], "--", label=f"{name}: worst cell", **kw)
         ax.set(title=tag, xlabel="t [s]", ylabel="imbalance / flow through the cells")
         ax.legend(fontsize=8)
-    fig.suptitle(
-        "Brain annulus, cvr22, vascular source: fluid created or lost cell by cell", fontsize=10
-    )
-    fig.tight_layout()
-    fig.savefig(f"{HERE}/figures/balance.png", dpi=120)
+    if root:
+        fig.suptitle(
+            "Brain annulus, cvr22, vascular source: fluid created or lost cell by cell", fontsize=10
+        )
+        fig.tight_layout()
+        fig.savefig(f"{HERE}/figures/balance.png", dpi=120)
