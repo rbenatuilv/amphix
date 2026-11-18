@@ -23,13 +23,13 @@ def problem_text(problem: Any) -> str:
 
 def save_results(path: str | Path, arrays: dict[str, Any], problem: Any) -> Path | None:
     """Write arrays and the problem tree to an .npz on rank 0; return the path (None elsewhere)."""
+    if "problem" in arrays:  # on every rank, before the rank-0 write
+        raise ValueError("save_results: 'problem' is reserved for the problem tree")
     if MPI.COMM_WORLD.rank != 0:
         return None
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {k: np.asarray(v) for k, v in arrays.items()}
-    if "problem" in data:
-        raise ValueError("save_results: 'problem' is reserved for the problem tree")
     np.savez(path, **data, problem=problem_text(problem))
     return path
 

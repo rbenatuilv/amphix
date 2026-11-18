@@ -45,6 +45,14 @@ def test_results_round_trip(tmp_path):
         save_results(tmp_path / "x.npz", {"problem": 1}, p)
 
 
+def test_reserved_key_refused_on_every_rank(tmp_path):
+    """The check comes before the rank-0 write: a bad call fails on every rank, not on rank 0
+    alone (the other ranks would go on, and wait for it)."""
+    with pytest.raises(ValueError, match="reserved"):
+        save_results(tmp_path / "x.npz", {"problem": 1}, problem())
+    assert not (tmp_path / "x.npz").exists()
+
+
 def test_fields_round_trip(tmp_path):
     """The saved fields are the model's."""
     model, rec = run_and_write(tmp_path / "f.npz")
