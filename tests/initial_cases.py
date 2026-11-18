@@ -66,6 +66,7 @@ def steady(folder):
     rec = Recorder(model)
     model.run([rec])
     rec.save()
+    model.domain.mesh.comm.barrier()  # rank 0 writes it, every rank reads it next
     return Path(folder) / "results" / "steady_fields.npz", flows(model)
 
 

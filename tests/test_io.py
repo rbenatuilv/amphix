@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from io_cases import measure, problem, run_and_write
 from meshes import write_two_subdomains
+from parallel import on_root, serial_only
 
 from amphix.core.mesh import Measures
 from amphix.io.fields import load_fields
@@ -37,7 +38,9 @@ def mpirun(*args):
 
 def test_results_round_trip(tmp_path):
     p = problem()
-    path = save_results(tmp_path / "r.npz", {"t": [0.0, 0.1], "probe_p": [[1.0], [2.0]]}, p)
+    path = on_root(
+        save_results(tmp_path / "r.npz", {"t": [0.0, 0.1], "probe_p": [[1.0], [2.0]]}, p)
+    )
     res = load_results(path)
     assert np.array_equal(res["t"], [0.0, 0.1]) and res["probe_p"].shape == (2, 1)
     assert res["problem"] == p.raw
@@ -118,6 +121,7 @@ def test_tags_round_trip(tmp_path, mesh):
     )
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 def test_files_do_not_depend_on_the_ranks(tmp_path):
     """Written on two ranks = written on one; read on two ranks = read on one (tags included)."""

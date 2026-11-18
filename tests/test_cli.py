@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import yaml
 from cases import annulus, cell_values
+from parallel import on_root, write_text
 from test_twofield import run
 
 import amphix
@@ -37,8 +38,7 @@ PUBLIC = [
 
 
 def write(path, tree):
-    path.write_text(yaml.safe_dump(tree, sort_keys=False))
-    return path
+    return write_text(path, yaml.safe_dump(tree, sort_keys=False))
 
 
 def test_end_to_end_from_yaml(tmp_path, capsys):
@@ -49,7 +49,7 @@ def test_end_to_end_from_yaml(tmp_path, capsys):
     argv = ["run", str(path), "--name", "e2e", "--set", "output.boundary_flux=raw"]
     argv += ["--set", "output.fields={quantities: [p], at: {from: 0.01, to: 0.05}}"]
     assert main(argv) == 0
-    out = capsys.readouterr().out
+    out = on_root(capsys.readouterr().out)  # rank 0 talks
     assert "e2e: poro2" in out and "5 steps" in out and "saved" in out
     assert "fields ['p'] at 5 times" in out  # the memory they take, before the run
     r = amphix.load_results(tmp_path / "results" / "e2e.npz")
@@ -84,7 +84,7 @@ def test_run_from_a_script(tmp_path):
         "output": {"probes": {"points": {"c": [5e-3, 5e-3]}, "quantities": ["p"]}},
     }
     problem = amphix.load(write(tmp_path / "square.yaml", tree))
-    path = amphix.run(problem, verbose=False)
+    path = on_root(amphix.run(problem, verbose=False))  # the path on rank 0
     assert path == tmp_path / "results" / "square.npz"
     r = amphix.load_results(path)
     assert r["probe_p"].shape == (3, 1) and np.isfinite(r["probe_p"]).all()
