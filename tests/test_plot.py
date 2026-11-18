@@ -2,6 +2,7 @@
 cells, one value per cell, snapshots and averages, components, log scales, zoom and arrows, time
 series, the command line, and amphix without matplotlib."""
 
+import os
 import subprocess
 import sys
 import warnings
@@ -12,6 +13,7 @@ import matplotlib
 import numpy as np
 import pytest
 from mpi4py import MPI
+from parallel import serial_only, shared_dir
 from PIL import Image
 from test_hdiv import square
 
@@ -31,6 +33,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 PROBES = {"a": [0.25, 0.5], "b": [0.75, 0.25]}
+MPI_LAUNCHER = ("PMI_", "PMIX_", "HYDRA_", "MPIR_", "OMPI_")  # what mpirun sets for its ranks
+LATTICE = serial_only("amphix.plot draws on one process (plot/lattice.py)")
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +46,7 @@ def _close():
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     """A poro2 run (P2) recorded every step: results/run.npz and results/run_fields.npz."""
-    root = tmp_path_factory.mktemp("plot")
+    root = shared_dir(tmp_path_factory, "plot")
     output = {
         "dir": "results",
         "name": "run",
@@ -83,6 +87,7 @@ def write(path, deg, expr, jump=False, shape=()):
     return load_fields(path, MPI.COMM_SELF)
 
 
+@LATTICE
 @pytest.mark.parametrize(("deg", "expr"), [(1, lambda x: 1 + 2 * x[0] - 3 * x[1]), (2, poly)])
 def test_exact_at_the_lattice(tmp_path, deg, expr):
     """A P1 or P2 field is drawn with its exact values at every sub-triangle vertex."""
@@ -95,6 +100,7 @@ def test_exact_at_the_lattice(tmp_path, deg, expr):
     assert fp.ax.get_xlabel() == "x [mm]" and fp.ax.get_title() == "f, t = 0 s"
 
 
+@LATTICE
 def test_jumps_kept(tmp_path):
     """The points of a shared edge belong to each cell: two values at one place."""
     fields = write(tmp_path / "f.npz", 1, lambda x: x[0], jump=True)
@@ -108,6 +114,7 @@ def test_jumps_kept(tmp_path):
         assert np.ptp(values[where.ravel() == s]) > 1.0
 
 
+@LATTICE
 def test_one_value_per_cell(tmp_path):
     fields = write(tmp_path / "f.npz", 1, lambda x: 1 + 2 * x[0] - 3 * x[1])
     fp = field(fields, "f", cells=True, mesh=True)
@@ -129,6 +136,7 @@ def test_unsupported_meshes():
         Lattice(quads, 1)
 
 
+@LATTICE
 def test_snapshots_and_average(fl):
     assert np.allclose(fl.snap_t, [0, 0.05, 0.1, 0.15, 0.2, 0.25])
     with pytest.warns(UserWarning, match=r"nearest one, t = 0\.1 s"):
@@ -153,6 +161,7 @@ def test_snapshots_and_average(fl):
         field(fl, "p", slice={"normal": "z", "at": 0})
 
 
+@LATTICE
 def test_components(fl):
     raw = field(fl, "cflux", t=0.2).lattice.values(fl.function("cflux", 4))
     x, y, mag = (
@@ -170,6 +179,7 @@ def test_components(fl):
         field(fl, "p", component="x")
 
 
+@LATTICE
 def test_log_scale(tmp_path):
     """The zeros of a magnitude are left out; the automatic scale spans at most DECADES
     decades. A signed quantity on a log scale must be positive where it is shown."""
@@ -201,6 +211,7 @@ def test_log_scale(tmp_path):
     assert field(positive, "f", log=True).image.norm.vmin == pytest.approx(1.0)
 
 
+@LATTICE
 def test_zoom_and_arrows(tmp_path, fl):
     """The automatic scale spans the shown region; about N arrows of unit length, in the mesh."""
     fields = write(tmp_path / "f.npz", 1, lambda x: x[0])
@@ -234,6 +245,7 @@ def test_series(run):
         series(r, "cbflux_pial", ax)
 
 
+@LATTICE
 def test_command_line(run, monkeypatch, capsys):
     monkeypatch.chdir(run)
     assert main(["plot", "run", "p", "cflux", "--at", "0.12", "--quiver", "9"]) == 0
@@ -271,8 +283,10 @@ def test_amphix_without_matplotlib(tmp_path):
         "from amphix.cli import main\n"
         "sys.exit(main(['plot', 'run', 'p']))\n"
     )
-    done = subprocess.run(
+    env = {k: v for k, v in os.environ.items() if not k.startswith(MPI_LAUNCHER)}
+    done = subprocess.run(  # a plain python, not a rank of this mpirun
         [sys.executable, "-c", code],
+        env=env,
         capture_output=True,
         text=True,
         cwd=tmp_path,
@@ -283,6 +297,7 @@ def test_amphix_without_matplotlib(tmp_path):
     assert "amphix plot: amphix.plot needs matplotlib" in done.stderr
 
 
+@LATTICE
 def test_fieldplot_updates(fl):
     """Built once, redrawn: the arrays change, the triangulation does not."""
     fp = FieldPlot(fl, "p", vmin=-1.0, vmax=1.0)
@@ -294,6 +309,7 @@ def test_fieldplot_updates(fl):
     assert fp.ax.get_title() == "p, t = 0.25 s" and fp.image.norm.vmax == 1.0
 
 
+@LATTICE
 def test_animate(fl, tmp_path, monkeypatch):
     """One frame per snapshot in [t_from, t_to], one colour scale, one triangulation."""
     built, clims = [], []
@@ -340,6 +356,7 @@ def test_animate_writers(fl, tmp_path, monkeypatch):
         animate(fl, "p", tmp_path / "p.mp4")
 
 
+@LATTICE
 @pytest.mark.slow
 def test_animate_mp4(fl, tmp_path):
     if not animation_module.animation.writers.is_available("ffmpeg"):
@@ -347,6 +364,7 @@ def test_animate_mp4(fl, tmp_path):
     assert animate(fl, "p", tmp_path / "p.mp4", t_to=0.1).stat().st_size > 0
 
 
+@LATTICE
 @pytest.mark.slow
 def test_command_line_gif(run, monkeypatch, capsys):
     monkeypatch.chdir(run)

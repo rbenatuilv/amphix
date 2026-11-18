@@ -9,10 +9,12 @@ from pathlib import Path
 
 import pytest
 from meshes import domains, ghosts, integrals, write_two_subdomains
+from parallel import serial_only
 
 MPIRUN = shutil.which("mpirun", path=str(Path(sys.executable).parent)) or shutil.which("mpirun")
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 def test_two_ranks_equal_serial(tmp_path):
     msh = write_two_subdomains(tmp_path / "two.msh")

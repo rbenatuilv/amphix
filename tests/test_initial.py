@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import yaml
 from initial_cases import CN, STEADY, problem, restart, state, steady
+from parallel import copy_file, serial_only, shared_dir, write_text
 
 import amphix.physics.poro  # noqa: F401
 from amphix.cli import run
@@ -26,7 +27,7 @@ CASES = Path(__file__).with_name("initial_cases.py")
 @pytest.fixture(scope="module")
 def saved(tmp_path_factory):
     """The steady fields file and the steady flows."""
-    return steady(tmp_path_factory.mktemp("steady"))
+    return steady(shared_dir(tmp_path_factory, "steady"))
 
 
 def test_the_saved_state_is_put_back_exactly(saved):
@@ -50,6 +51,7 @@ def test_a_steady_start_stays_steady(saved):
         assert abs(out["flows"][name] - q) < 1e-9 * abs(flows["left"]), name
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.slow
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 def test_a_steady_start_on_two_ranks(saved):
@@ -101,13 +103,13 @@ def test_a_model_does_not_step_without_its_initial_state(tmp_path):
 
 def test_from_is_relative_to_the_yaml(saved, tmp_path):
     path, _ = saved
-    (tmp_path / "cases" / "results").mkdir(parents=True)
-    shutil.copy(path, tmp_path / "cases" / "results" / "steady_fields.npz")
-    (tmp_path / "cases" / "case.yaml").write_text(
-        "model: poro2\ninitial: {from: results/steady_fields.npz}\n"
+    copy_file(path, tmp_path / "cases" / "results" / "steady_fields.npz")
+    write_text(
+        tmp_path / "cases" / "case.yaml",
+        "model: poro2\ninitial: {from: results/steady_fields.npz}\n",
     )
     tree = {k: v for k, v in problem(CN).raw.items() if k != "model"}
-    (tmp_path / "run.yaml").write_text(yaml.safe_dump({"base": "cases/case.yaml", **tree}))
+    write_text(tmp_path / "run.yaml", yaml.safe_dump({"base": "cases/case.yaml", **tree}))
     p = load(tmp_path / "run.yaml")
     assert p.initial.path == tmp_path / "cases" / "results" / "steady_fields.npz"
     assert p.initial.index == 0 and p.initial.time == STEADY["T"]

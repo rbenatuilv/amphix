@@ -25,8 +25,9 @@ of Ern, Nicaise and Vohralik (2007) and Bastian and Riviere (2003).
 
 Solve. Facet and interior unknowns decouple: the facet block is the normal-trace mass matrix (block
 diagonal by facet), the interior block the moments of the RT bubbles (block diagonal by cell). Both
-are constant, assembled and factorised once; each compute() assembles two right-hand sides. Serial
-only.
+are constant, assembled and factorised once; each compute() assembles two right-hand sides. In
+parallel each rank takes its owned dofs (the bubbles of a cell belong to the cell's owner); the
+facet integrals on rank boundaries need the ghosted facets (GhostMode.shared_facet).
 """
 
 from typing import Any
@@ -49,8 +50,6 @@ class Reconstruction:
     def __init__(self, model: Balance) -> None:
         """Build the RT space, the two blocks (factorised once) and the right-hand side forms."""
         mesh, n = model.domain.mesh, model.measures.n
-        if mesh.comm.size > 1:
-            raise NotImplementedError("flux reconstruction: serial runs only")
         self.model, self.k = model, model.trace_degree()
         if self.k < 1:
             raise ValueError("flux reconstruction needs normal traces of degree >= 1")
@@ -88,20 +87,28 @@ class Reconstruction:
         self.rhs_facet, self.rhs_cell = dolfinx.fem.form(rhs_facet), dolfinx.fem.form(rhs_cell)
 
     def _blocks(self, a_facet: Any, a_cell: Any, W: Any) -> None:
-        """Split the RT dofs into facet and interior ones; assemble and factorise both blocks."""
-        mesh = self.V.mesh
+        """Split the owned RT dofs into facet and interior ones; assemble and factorise both blocks.
+
+        The index sets are global (PETSc numbering); self._f and self._b are the same dofs in the
+        local numbering, to move values between the RT vectors and the blocks' vectors.
+        """
+        mesh, comm = self.V.mesh, self.V.mesh.comm
         tdim = mesh.topology.dim
         ncells = mesh.topology.index_map(tdim).size_local
+        imap = self.V.dofmap.index_map
         local_int = np.asarray(self.V.dofmap.dof_layout.entity_dofs(tdim, 0), dtype=np.int32)
-        interior_dofs = np.unique(self.V.dofmap.list[:ncells][:, local_int].ravel()).astype(
-            np.int32
+        self._b = np.unique(self.V.dofmap.list[:ncells][:, local_int].ravel()).astype(np.int32)
+        ndofs = imap.size_local
+        assert np.all(self._b < ndofs), "the bubbles of an owned cell must be owned"
+        self._f = np.setdiff1d(np.arange(ndofs, dtype=np.int32), self._b)
+        start = imap.local_range[0]
+        self.is_f = PETSc.IS().createGeneral(self._f + start, comm=comm)
+        self.is_b = PETSc.IS().createGeneral(self._b + start, comm=comm)
+        bs = W.dofmap.index_map_bs  # all moments of the owned cells
+        rows = W.dofmap.index_map.local_range[0] * bs + np.arange(
+            W.dofmap.index_map.size_local * bs, dtype=np.int32
         )
-        ndofs = self.V.dofmap.index_map.size_local
-        facet_dofs = np.setdiff1d(np.arange(ndofs, dtype=np.int32), interior_dofs)
-        self.is_f = PETSc.IS().createGeneral(facet_dofs)
-        self.is_b = PETSc.IS().createGeneral(interior_dofs)
-        nrows = W.dofmap.index_map.size_local * W.dofmap.index_map_bs
-        self.is_rows = PETSc.IS().createGeneral(np.arange(nrows, dtype=np.int32))  # all moments
+        self.is_rows = PETSc.IS().createGeneral(rows, comm=comm)
         A = dolfinx.fem.petsc.assemble_matrix(dolfinx.fem.form(a_facet))
         A.assemble()
         B = dolfinx.fem.petsc.assemble_matrix(dolfinx.fem.form(a_cell))
@@ -114,21 +121,26 @@ class Reconstruction:
         self.bf, self.rhs_b = self.A_ff.createVecLeft(), self.B_rb.createVecLeft()
 
     def solve(self) -> dolfinx.fem.Function:
-        """Compute the velocity of the last step in solver units (self.u) and return it."""
+        """Compute the velocity of the last step in solver units (self.u) and return it.
+
+        The blocks' vectors hold the owned dofs in the order of the index sets, so the owned part
+        of the RT vectors maps to them through the local indices self._f and self._b.
+        """
         bf = dolfinx.fem.petsc.assemble_vector(self.rhs_facet)
         bf.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         bc = dolfinx.fem.petsc.assemble_vector(self.rhs_cell)
         bc.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        f_idx, b_idx = self.is_f.getIndices(), self.is_b.getIndices()
-        self.bf.setArray(bf.getArray(readonly=True)[f_idx])
+        self.bf.setArray(bf.getArray(readonly=True)[self._f])  # owned part only
         self.ksp_f.solve(self.bf, self.uf)
         self.B_rf.mult(self.uf, self.rhs_b)  # move the facet part to the right-hand side
-        self.rhs_b.aypx(-1.0, bc)
+        self.rhs_b.aypx(-1.0, bc)  # bc's owned rows are is_rows, in order
         self.ksp_b.solve(self.rhs_b, self.ub)
         x = self.u.x.array
-        x[f_idx] = self.uf.getArray(readonly=True)
-        x[b_idx] = self.ub.getArray(readonly=True)
-        self.u.x.scatter_forward()
+        x[self._f] = self.uf.getArray(readonly=True)
+        x[self._b] = self.ub.getArray(readonly=True)
+        self.u.x.scatter_forward()  # the ghosts
+        bf.destroy()
+        bc.destroy()
         return self.u
 
     def compute(self) -> dolfinx.fem.Function:

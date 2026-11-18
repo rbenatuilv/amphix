@@ -51,10 +51,9 @@ def run_and_write(path, mesh=None, moving="left"):
     p = problem(mesh)
     domain = build(p.mesh, p.scales.L0, p.root)
     model = make_model(p, domain, boundary_data=boundaries(list(domain.facet_names), moving))
-    rec = Reconstruction(model) if model.domain.mesh.comm.size == 1 else None
+    rec = Reconstruction(model)
     sources = {n: (lambda n=n: model.quantity(n)) for n in NAMES[:4]}
-    if rec is not None:
-        sources["cflux"] = rec.compute
+    sources["cflux"] = rec.compute
     writer = FieldWriter(model.domain, sources)
     for t in model.steps():
         writer(t)

@@ -2,10 +2,10 @@
 
 import dataclasses
 
-import dolfinx
 import numpy as np
 import pytest
 from meshes import integrals
+from parallel import total
 
 from amphix.core.mesh import Measures, build, cell_size, mean_size
 
@@ -27,12 +27,8 @@ def test_measures_by_name():
 def test_h_hf_and_sizes():
     d = build(RECT, L0=1e-2)
     m, diag = Measures(d), 0.5 * np.sqrt(2)  # every cell: a right triangle of legs 0.5
-
-    def value(form):
-        return dolfinx.fem.assemble_scalar(dolfinx.fem.form(form))
-
-    assert value(m.h * m.dx()) == pytest.approx(diag * 2.0)
-    assert value(m.hF * m.dS) == pytest.approx(diag * integrals(d)["dS"])
+    assert total(m.h * m.dx()) == pytest.approx(diag * 2.0)
+    assert total(m.hF * m.dS) == pytest.approx(diag * integrals(d)["dS"])
     assert cell_size(d) == pytest.approx(diag * 1e-2)  # SI
     assert mean_size(d) == pytest.approx(np.sqrt(2.0 / 16) * 1e-2)
 

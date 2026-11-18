@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from io_cases import measure, problem, run_and_write
 from meshes import write_two_subdomains
+from parallel import COMM, serial_only, write_text
 
 from amphix.core.mesh import Measures
 from amphix.io.fields import load_fields
@@ -43,6 +44,32 @@ def test_results_round_trip(tmp_path):
     assert res["problem"] == p.raw
     with pytest.raises(ValueError, match="reserved"):
         save_results(tmp_path / "x.npz", {"problem": 1}, p)
+
+
+def test_reserved_key_refused_on_every_rank(tmp_path):
+    """The check comes before the rank-0 write: a bad call fails on every rank, not on rank 0
+    alone (the other ranks would go on, and wait for it)."""
+    with pytest.raises(ValueError, match="reserved"):
+        save_results(tmp_path / "x.npz", {"problem": 1}, problem())
+    assert not (tmp_path / "x.npz").exists()
+
+
+def test_failed_write_raises_on_every_rank(tmp_path):
+    """A write that fails on rank 0 (its folder is a file) raises on every rank, not on rank 0
+    alone while the others wait: rank 0 its own error, the others a RuntimeError saying so."""
+    blocker = write_text(tmp_path / "taken", "a file, not a folder")
+    target = blocker / "r.npz"
+    try:
+        save_results(target, {"t": [0.0]}, problem())
+        got = None
+    except Exception as e:  # what each rank raised, compared below
+        got = (type(e).__name__, isinstance(e, OSError), str(e))
+    every = COMM.allgather(got)  # every rank, before asserting
+    assert all(g is not None for g in every), f"a rank did not raise: {every}"
+    assert every[0][1], f"rank 0: not its own OSError: {every[0]}"
+    for name, _, message in every[1:]:
+        assert name == "RuntimeError" and str(target) in message and "rank 0" in message, every
+        assert every[0][2] in message, every  # rank 0's message
 
 
 def test_fields_round_trip(tmp_path):
@@ -110,6 +137,7 @@ def test_tags_round_trip(tmp_path, mesh):
     )
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 def test_files_do_not_depend_on_the_ranks(tmp_path):
     """Written on two ranks = written on one; read on two ranks = read on one (tags included)."""

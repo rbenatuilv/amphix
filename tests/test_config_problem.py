@@ -5,6 +5,7 @@ import warnings
 
 import pytest
 import toy_physics
+from parallel import write_text
 
 from amphix.config import ConfigError, ConfigWarning, Output, Time, from_dict, load
 from amphix.core import registry
@@ -47,12 +48,13 @@ def test_every_section():
 
 
 def test_with_and_load(tmp_path):
-    (tmp_path / "case.yaml").write_text(
+    write_text(
+        tmp_path / "case.yaml",
         "model: toy_a\nmaterial: {k: 1}\n"
-        "mesh: {shape: rectangle, corners: [[0, 0], [1, 1]], n: [2, 2]}\n"
+        "mesh: {shape: rectangle, corners: [[0, 0], [1, 1]], n: [2, 2]}\n",
     )
-    (tmp_path / "run.yaml").write_text(
-        "base: case.yaml\ntime: {T: 1, dt: 0.1}\noutput: {name: renamed}\n"
+    write_text(
+        tmp_path / "run.yaml", "base: case.yaml\ntime: {T: 1, dt: 0.1}\noutput: {name: renamed}\n"
     )
     p = load(tmp_path / "run.yaml", {"time.dt": 0.05, "material.k": 4})
     assert p.time.nsteps == 20 and p.section("material").k == 4.0 and p.name == "renamed"

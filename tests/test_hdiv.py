@@ -60,7 +60,15 @@ def compiled(forms):
 
 
 def assemble(form):
-    return dolfinx.fem.assemble_vector(form).array
+    """One value per owned cell (with the contributions of the ghost cells' facets)."""
+    vec = dolfinx.fem.assemble_vector(form)
+    vec.scatter_reverse(dolfinx.la.InsertMode.add)
+    return vec.array[: vec.index_map.size_local]
+
+
+def total(form, comm):
+    """A scalar form summed over the ranks."""
+    return comm.allreduce(dolfinx.fem.assemble_scalar(form))
 
 
 @pytest.mark.parametrize(
@@ -93,7 +101,8 @@ def test_conservative(model, deg, theta):
         rec.solve()
         a = {k: assemble(f) for k, f in forms.items()}
         assert np.abs(a["mis"]).max() < 1e-12 * a["through"].max()  # facet flows = Fhat
-        assert dolfinx.fem.assemble_scalar(jump) < 1e-24 * dolfinx.fem.assemble_scalar(scale)
+        comm = m.domain.mesh.comm
+        assert total(jump, comm) < 1e-24 * total(scale, comm)
         assert np.abs(a["div"]).max() < 1e-11 * np.abs(a["div_scale"]).max()  # div u = -gained
 
 
@@ -175,7 +184,7 @@ def final_error(model, deg, n, dt, end=0.05, theta=0.5):
     for _ in m.steps():
         pass
     rec.compute()
-    return np.sqrt(abs(dolfinx.fem.assemble_scalar(form)))
+    return np.sqrt(abs(total(form, m.domain.mesh.comm)))
 
 
 @pytest.mark.parametrize(

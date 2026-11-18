@@ -138,7 +138,8 @@ def test_rannacher_start_and_the_regular_matrix():
     diff = start.system.matrix().copy()
     diff.axpy(-1.0, plain.system.matrix())
     assert diff.norm() < 1e-14 * regular.norm()  # refactorised at step 3
-    assert len(start.system.dofs("u")) == start.system.ndofs and start.system.rhs().getSize() > 0
+    owned = start.domain.mesh.comm.allreduce(len(start.system.dofs("u")))  # rows on each rank
+    assert owned == start.system.ndofs and start.system.rhs().getSize() > 0
 
 
 def test_order_in_space():

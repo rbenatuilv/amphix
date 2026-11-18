@@ -1,10 +1,10 @@
 """io.Recorder: nothing recorded unless asked for; each block records exactly its quantities at
 exactly its steps; boundary flows as computed by hand; cflux outputs; a 3D run with slices."""
 
-import dolfinx
 import numpy as np
 import pytest
 import ufl
+from parallel import total
 from test_hdiv import MATERIAL, square
 
 import amphix.physics.poro  # noqa: F401
@@ -131,11 +131,8 @@ def test_blocks_at_their_own_steps(tmp_path):
     assert np.allclose(fl.snap_t, [0.05, 0.15, 0.25])
     q = fl.function("cflux", 1)  # stored exactly: no normal jump
     n = ufl.FacetNormal(fl.domain.mesh)
-    jump = dolfinx.fem.assemble_scalar(dolfinx.fem.form(ufl.jump(q, n) ** 2 * ufl.dS))
-    scale = dolfinx.fem.assemble_scalar(
-        dolfinx.fem.form(ufl.inner(ufl.avg(q), n("+")) ** 2 * ufl.dS)
-    )
-    assert jump < 1e-24 * scale
+    jump = total(ufl.jump(q, n) ** 2 * ufl.dS)
+    assert jump < 1e-24 * total(ufl.inner(ufl.avg(q), n("+")) ** 2 * ufl.dS)
     mean = np.mean([fl.function("cflux", i).x.array for i in (1, 2)], axis=0)
     assert np.allclose(fl.average("cflux", 0.05, 0.25).x.array, mean)
     assert (tmp_path / "cf" / "cflux.bp").exists()

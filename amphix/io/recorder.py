@@ -152,8 +152,8 @@ class Recorder:
         p = self.model.problem
         return Path(p.root) / self.o.dir / f"{p.name}.npz"
 
-    def save(self, path: str | Path | None = None) -> Path | None:
-        """Write every record (positions and the problem tree too); return the path (rank 0)."""
+    def save(self, path: str | Path | None = None) -> Path:
+        """Write every record (positions, problem tree); return the path on every rank, written."""
         if self.paraview is not None:
             self.paraview.close()
             self.paraview = None

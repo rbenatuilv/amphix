@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from parallel import write_text
 
 from amphix.config.loader import merge, override, parse_set, read, read_tree, yaml_load
 from amphix.config.validate import ConfigError
@@ -40,15 +41,15 @@ def test_bad_set_items(item):
 
 def test_base_chain(tmp_path):
     """study -> experiment -> case: each base relative to its own file, later files win."""
-    for d in ("cases", "app", "study"):
-        (tmp_path / d).mkdir()
-    (tmp_path / "cases" / "case.yaml").write_text(
-        "model: poro2\nmaterial: {mu: 1, lambda: 1, K: 1}\nmesh: {shape: gmsh, file: mesh.msh}\n"
+    write_text(
+        tmp_path / "cases" / "case.yaml",
+        "model: poro2\nmaterial: {mu: 1, lambda: 1, K: 1}\nmesh: {shape: gmsh, file: mesh.msh}\n",
     )
-    (tmp_path / "app" / "exp.yaml").write_text(
-        "base: ../cases/case.yaml\nmaterial: {K: 2}\ntime: {T: 1, dt: 0.1}\noutput: {dir: out}\n"
+    write_text(
+        tmp_path / "app" / "exp.yaml",
+        "base: ../cases/case.yaml\nmaterial: {K: 2}\ntime: {T: 1, dt: 0.1}\noutput: {dir: out}\n",
     )
-    (tmp_path / "study" / "st.yaml").write_text("base: ../app/exp.yaml\nmaterial: {mu: 3}\n")
+    write_text(tmp_path / "study" / "st.yaml", "base: ../app/exp.yaml\nmaterial: {mu: 3}\n")
     tree, name, root = read(tmp_path / "app" / "exp.yaml")
     assert tree["material"] == {"mu": 1, "lambda": 1, "K": 2} and tree["output"] == {"dir": "out"}
     assert name == "exp" and root == tmp_path / "app" and "base" not in tree
@@ -58,17 +59,17 @@ def test_base_chain(tmp_path):
 
 
 def test_base_errors(tmp_path):
-    (tmp_path / "a.yaml").write_text("base: b.yaml\n")
-    (tmp_path / "b.yaml").write_text("base: a.yaml\n")
+    write_text(tmp_path / "a.yaml", "base: b.yaml\n")
+    write_text(tmp_path / "b.yaml", "base: a.yaml\n")
     with pytest.raises(ConfigError, match=r"^base: loop a.yaml -> b.yaml -> a.yaml"):
         read(tmp_path / "a.yaml")
-    (tmp_path / "c.yaml").write_text("base: missing.yaml\n")
+    write_text(tmp_path / "c.yaml", "base: missing.yaml\n")
     with pytest.raises(ConfigError, match=r"^base: no file .*missing.yaml \(base of c.yaml\)"):
         read(tmp_path / "c.yaml")
-    (tmp_path / "d.yaml").write_text("- 1\n- 2\n")
+    write_text(tmp_path / "d.yaml", "- 1\n- 2\n")
     with pytest.raises(ConfigError, match="must be a section"):
         read(tmp_path / "d.yaml")
-    (tmp_path / "e.yaml").write_text("a: [1, 2\n")
+    write_text(tmp_path / "e.yaml", "a: [1, 2\n")
     with pytest.raises(ConfigError, match="not valid YAML"):
         read(tmp_path / "e.yaml")
 
