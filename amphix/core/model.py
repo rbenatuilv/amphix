@@ -24,6 +24,10 @@ derived quantity (a UFL expression interpolated on demand, or a Function returne
 One step: before_step (refactorise if it says so); state.previous <- current; t_old <- t,
 t <- t0 + (n + 1) dt; solve; split into the fields; after_step; n += 1.
 
+Initial state: rest, or set_initial() before the first step. A problem's `initial` section is
+applied by io.initial.apply_initial (amphix.run does it); a model whose problem has one refuses to
+step until it was applied.
+
 Two views of the state: `state` holds the solver-unit Functions the forms are built on (physics
 code); field(), previous() and quantity() return SI copies (scripts, post, io).
 """
@@ -145,6 +149,8 @@ class Model:
     condition_kinds: ClassVar[tuple[ConditionKind, ...]] = ()
     source_kinds: ClassVar[tuple[SourceKind, ...]] = ()
     time_keys: ClassVar[frozenset[str]] = frozenset()
+    tracked: ClassVar[frozenset[str]] = frozenset()  # state besides the fields (Newmark: d_t)
+    restarts: ClassVar[bool] = True  # can start from saved fields (its tracked state at zero)
 
     def __init_subclass__(cls, **kw: Any) -> None:
         """Register a subclass that defines a name (the YAML `model:` value)."""
@@ -188,6 +194,11 @@ class Model:
         for name, f in self.space.functions().items():
             self.state.track(name, f, self.fields[name])
         self.initialize()
+        if set(self.state.current) != {*self.fields, *self.tracked}:
+            raise TypeError(
+                f"{self.name} tracks {sorted(self.state.current)}; its fields and `tracked` "
+                f"say {sorted({*self.fields, *self.tracked})}"
+            )
         F = self.residual(self.space.trial(), self.space.test())
         self.system = System(F, self.space, problem.solver, self.regular_constants)
         self._si: dict[tuple[str, str], dolfinx.fem.Function] = {}
@@ -263,6 +274,11 @@ class Model:
 
     def step(self) -> float:
         """Take one time step; return the new time [s]."""
+        if self.n == 0 and self._version == 0 and getattr(self.problem, "initial", None):
+            raise RuntimeError(
+                "the problem has an `initial` section: apply it before the first step "
+                "(io.initial.apply_initial(model); amphix.run does it)"
+            )
         if self.before_step():
             self.system.solver.update_matrix()
         self.state.save_previous()
@@ -289,7 +305,12 @@ class Model:
                 observe(self)
 
     def set_initial(self, **values: Data) -> None:
-        """Set tracked state at t0 from SI data (fields, and what the physics tracks)."""
+        """Set tracked state at t0 from SI data (fields, and what the physics tracks).
+
+        Each value is interpolated into its state's space: any data of core.expressions, a
+        Function on the model's mesh included (exact, to round-off, when it has the state's
+        element). The state not given keeps its value (zero for a new model).
+        """
         if self.n != 0:
             raise RuntimeError("set_initial: only before the first step")
         for name, value in values.items():

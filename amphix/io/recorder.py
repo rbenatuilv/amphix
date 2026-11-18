@@ -1,18 +1,26 @@
 """The Recorder: what a problem's `output` section asks for, recorded during a run (all SI).
 
-    rec = Recorder(model)                # reads model.problem.output (probes, lines, grid, ...)
+    rec = Recorder(model)                # reads model.problem.output (config.sections.Output)
     model.run([rec])                     # an observer: called at t0 and after every step
     path = rec.save()                    # -> <root>/<output.dir>/<name>.npz (+ <name>_fields.npz)
 
-Recorded every step: the `series` quantities at the probes, and the flow through every named
-boundary of the raw flux (bflux_<boundary>) and, when cflux is asked for, of the conservative one
-(cbflux_<boundary>). At the `snapshots`: grids (2D), slices (3D) and lines of the series quantities
-together with flux and p, the normal jump of the raw flux (`jump`), and the full fields
-(output.fields, to <name>_fields.npz). ParaView files every output.paraview steps.
+Nothing is recorded but `t` (every step) unless a block asks for it, and each block records exactly
+its quantities at exactly its steps:
+
+    boundary_flux   every step: the flow through every named boundary of the raw flux
+                    (bflux_<boundary>) and/or of the conservative one (cbflux_<boundary>)
+    probes          every step: probe_<q>, with probe_names and probes (the positions)
+    lines           at lines_t: line_<path>_<q>, with line_<path> (the points)
+    grid            at grid_t: grid_<q>, with grid (2D)
+    slices          at slices_t: slice_<plane>_<q>, with slice_<plane> (3D)
+    jump            at jump_t: jump, the normal jump of the raw flux (post.integrals.NormalJump)
+    fields          at its own times: the full fields, to <name>_fields.npz (held in memory until
+                    save(); fields_bytes() estimates how much)
+    paraview        at its times: ParaView files of its quantities
 
 cflux is post.hdiv's reconstruction (the model must implement core.balance.Balance): it is built
-when cflux is in `series` or `fields`, and computed once per step. Points outside the mesh give
-NaN.
+when a block asks for cflux or boundary_flux is conservative, and computed once per step. Points
+outside the mesh give NaN.
 """
 
 from pathlib import Path
@@ -29,8 +37,6 @@ from amphix.post.hdiv import Reconstruction
 from amphix.post.integrals import BoundaryIntegrals, NormalJump
 from amphix.post.sampling import Points, grid_points, line_points, slice_points
 
-DEFAULT_FIELDS = ["d", "p", "flux"]  # output.fields: true
-
 
 class Recorder:
     """Records a run as the problem's `output` section asks (see the module docstring)."""
@@ -38,36 +44,41 @@ class Recorder:
     def __init__(self, model: Any, output: Any = None) -> None:
         """Set up every requested output; call before the first step."""
         self.model, self.o = model, output or model.problem.output
-        domain, dim = model.domain, model.domain.dim
-        if (self.o.grid and dim != 2) or (self.o.slices and dim != 3):
-            raise ValueError("output: `grid` is for 2D meshes, `slices` for 3D meshes")
-        names = DEFAULT_FIELDS if self.o.fields is True else list(self.o.fields or [])
-        self.rec = Reconstruction(model) if "cflux" in [*self.o.series, *names] else None
+        o, domain = self.o, model.domain
+        wanted = {q for b in o.blocks().values() for q in b.quantities}
+        cflux = "cflux" in wanted or "conservative" in o.boundary_flux
+        self.rec = Reconstruction(model) if cflux else None
         self._cflux_at: int | None = None
-        self.probes = Points(domain, list(self.o.probes.values())) if self.o.probes else None
-        self.lines = {
-            k: (line_points(v), Points(domain, line_points(v))) for k, v in self.o.lines.items()
-        }
-        self.grid = None
-        if self.o.grid:
-            pts = grid_points(domain, int(self.o.grid))
-            self.grid = (pts, Points(domain, pts))
-        self.slices = {
-            k: (pts, Points(domain, pts))
-            for k, pts in ((k, slice_points(domain, v)) for k, v in self.o.slices.items())
-        }
-        self.snap_times = self.o.times(model.problem.time)
-        self.snap_quantities = sorted(set(self.o.series) | ({"flux", "p"} & set(self._names())))
-        self.jump = NormalJump(self.quantity("flux"), model.measures) if self._has("flux") else None
-        self.flows = self._flows() if self.o.boundary_flux else {}
-        self.fields = FieldWriter(domain, {n: self._source(n) for n in names}) if names else None
+        self.probes = Points(domain, list(o.probes.spec["points"].values())) if o.probes else None
+        self.sampled: list[tuple[str, Any, dict[str, tuple[np.ndarray, Points]]]] = []
+        for key in ("lines", "grid", "slices"):
+            block = getattr(o, key)
+            if block is not None:
+                pts = {k: (x, Points(domain, x)) for k, x in self._points(key, block.spec).items()}
+                self.sampled.append((key, block, pts))
+        self.jump = NormalJump(self.quantity("flux"), model.measures) if o.jump else None
+        self.flows = self._flows()
+        self.fields = None
+        if o.fields:
+            self.fields = FieldWriter(domain, {n: self._source(n) for n in o.fields.quantities})
         self.paraview = None
-        if self.o.paraview:
-            quantities = sorted(set(self.snap_quantities) | {"d"} & set(self._names()))
-            self.paraview = ParaView(
-                domain, {n: self._source(n) for n in quantities}, self.path().with_suffix("")
-            )
+        if o.paraview:
+            sources = {n: self._source(n) for n in o.paraview.quantities}
+            self.paraview = ParaView(domain, sources, self.path().with_suffix(""))
         self.data: dict[str, list] = {}
+
+    def _points(self, key: str, spec: dict) -> dict[str, np.ndarray]:
+        """Return {result key: points} of a lines, grid or slices block."""
+        domain = self.model.domain
+        if key == "lines":
+            return {f"line_{k}": line_points(v) for k, v in spec["paths"].items()}
+        if key == "grid":
+            return {"grid": grid_points(domain, int(spec["n"]))}
+        return {f"slice_{k}": slice_points(domain, v) for k, v in spec["planes"].items()}
+
+    def fields_bytes(self) -> int:
+        """Return an estimate of the memory the `fields` block holds until save() [bytes]."""
+        return self.fields.nbytes(len(self.o.fields.steps)) if self.fields else 0
 
     # -- quantities ---------------------------------------------------------------------------
     def _names(self) -> list[str]:
@@ -81,7 +92,7 @@ class Recorder:
         if name != "cflux":
             return self.model.quantity(name)
         if self.rec is None:
-            raise KeyError("cflux: ask for it in output.series or output.fields")
+            raise KeyError("cflux: ask for it in an output block or boundary_flux: conservative")
         if self._cflux_at != self.model.n:
             self.rec.compute()
             self._cflux_at = self.model.n
@@ -92,8 +103,8 @@ class Recorder:
 
     def _flows(self) -> dict[str, BoundaryIntegrals]:
         m, out = self.model.measures, {}
-        for key, name in (("bflux", "flux"), ("cbflux", "cflux")):
-            if self._has(name):
+        for key, kind, name in (("bflux", "raw", "flux"), ("cbflux", "conservative", "cflux")):
+            if kind in self.o.boundary_flux:
                 out[key] = BoundaryIntegrals(
                     ufl.inner(self.quantity(name), m.n), self.model.domain, m
                 )
@@ -106,35 +117,35 @@ class Recorder:
     def __call__(self, model: Any = None) -> None:
         """Record the current state (at t0 and after every step)."""
         m = model or self.model
-        t, dt = m.t, m.problem.time.dt
+        t, n = m.t, m.n
         self._append("t", t)
         if self.probes is not None:
-            for name in self.o.series:
+            for name in self.o.probes.quantities:
                 self._append(f"probe_{name}", self.probes(self.quantity(name)))
         for key, flows in self.flows.items():
             self.quantity("cflux" if key == "cbflux" else "flux")  # refresh the SI copy
             for boundary, value in flows().items():
                 self._append(f"{key}_{boundary}", value)
-        if any(abs(t - ts) < dt / 2 for ts in self.snap_times):
-            self._snapshot(t)
-        if self.paraview is not None and m.n % self.o.paraview == 0:
-            self.paraview.write(t)
+        self._timed(t, n)
 
-    def _snapshot(self, t: float) -> None:
-        self._append("snap_t", t)
-        for name in self.snap_quantities:
-            f = self.quantity(name)
-            if self.grid is not None:
-                self._append(f"grid_{name}", self.grid[1](f))
-            for sn, (_, pts) in self.slices.items():
-                self._append(f"slice_{sn}_{name}", pts(f))
-            for ln, (_, pts) in self.lines.items():
-                self._append(f"line_{ln}_{name}", pts(f))
-        if self.jump is not None:
+    def _timed(self, t: float, n: int) -> None:
+        """Record the blocks whose steps include step n."""
+        o = self.o
+        for key, block, points in self.sampled:
+            if n in block.steps:
+                self._append(f"{key}_t", t)
+                for name in block.quantities:
+                    f = self.quantity(name)
+                    for prefix, (_, pts) in points.items():
+                        self._append(f"{prefix}_{name}", pts(f))
+        if self.jump is not None and n in o.jump.steps:
             self.quantity("flux")
+            self._append("jump_t", t)
             self._append("jump", self.jump())
-        if self.fields is not None:
+        if self.fields is not None and n in o.fields.steps:
             self.fields(t)
+        if self.paraview is not None and n in o.paraview.steps:
+            self.paraview.write(t)
 
     def path(self) -> Path:
         """Return <root>/<output.dir>/<name>.npz."""
@@ -152,11 +163,10 @@ class Recorder:
         mesh = self.model.domain.mesh
         extra: dict[str, Any] = {"ncells": mesh.topology.index_map(mesh.topology.dim).size_global}
         if self.o.probes:
-            extra["probe_names"] = np.array(list(self.o.probes))
-            extra["probes"] = np.array(list(self.o.probes.values()), dtype=float)
-        extra |= {f"line_{k}": pts for k, (pts, _) in self.lines.items()}
-        extra |= {f"slice_{k}": pts for k, (pts, _) in self.slices.items()}
-        if self.grid is not None:
-            extra["grid"] = self.grid[0]
+            points = self.o.probes.spec["points"]
+            extra["probe_names"] = np.array(list(points))
+            extra["probes"] = np.array(list(points.values()), dtype=float)
+        for _, _, points in self.sampled:
+            extra |= {prefix: x for prefix, (x, _) in points.items()}
         arrays = extra | {k: np.array(v) for k, v in self.data.items()}
         return save_results(path, arrays, self.model.problem)

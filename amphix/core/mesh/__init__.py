@@ -53,6 +53,7 @@ __all__ = [
     "build",
     "cell_size",
     "check",
+    "dimension",
     "from_msh",
     "ghosted_partitioner",
     "mean_size",
@@ -84,6 +85,14 @@ def check(section: dict) -> None:
             raise ValueError(f"mesh ({shape}): wall takes h, band and growth")
         if not all(isinstance(v, int | float) and v > 0 for v in wall.values()):
             raise ValueError(f"mesh ({shape}): wall h, band and growth must be positive numbers")
+
+
+def dimension(section: dict) -> int:
+    """Return the dimension of a checked mesh section (gmsh: its `dim`, default 2)."""
+    shape = section["shape"]
+    if shape == "gmsh":
+        return int(section.get("dim", 2))
+    return 3 if shape in ("box", "ball", "shell") else 2
 
 
 def build(section: dict, L0: float = 1.0, root: str | Path = ".") -> Domain:

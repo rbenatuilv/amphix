@@ -5,12 +5,13 @@
 `base:` names another YAML, relative to the file that contains it, which this file extends: nested
 sections merge key by key (`material: {K: 1.0e-12}` changes only K); any other value, lists
 included, is replaced. A base can have its own `base:` (experiment -> case); a loop is an error. A
-relative `mesh.file` stays relative to the file that gives it. The name of the problem (the file
-stem) and its root (the folder of `output.dir`) come from the file read, not from its bases.
+relative path (`mesh.file`, `initial.from`) stays relative to the file that gives it. The name of
+the problem (the file stem) and its root (the folder of `output.dir`) come from the file read, not
+from its bases.
 
 Overrides (`--set KEY=VALUE`, or a dict from Python) replace one key each, by its dotted path, after
 the bases are merged; a missing path is created. Their values are read as YAML, so
-`--set 'output.fields=[p, cflux]'` gives a list.
+`--set 'output.fields.quantities=[p, cflux]'` gives a list.
 
 Numbers: PyYAML follows YAML 1.1, where a float needs a dot, so `1e-3` would be the string "1e-3".
 The loader also reads exponent-only numbers (1e-3, 2E5, as YAML 1.2 does) as floats.
@@ -24,6 +25,8 @@ from typing import Any
 import yaml
 
 from amphix.config.validate import ConfigError, join, mapping
+
+PATHS = (("mesh", "file"), ("initial", "from"))  # file paths, relative to the YAML that gives them
 
 
 class _Loader(yaml.SafeLoader):
@@ -93,9 +96,10 @@ def read_tree(path: str | Path, _chain: tuple[Path, ...] = ()) -> dict:
         return tree
     base_path = path.parent / str(tree.pop("base"))
     base = read_tree(base_path, chain)
-    mesh = base.get("mesh")
-    if isinstance(mesh, dict) and "file" in mesh and not Path(mesh["file"]).is_absolute():
-        mesh["file"] = str((base_path.parent / mesh["file"]).resolve())  # relative to its base
+    for section, key in PATHS:
+        node = base.get(section)
+        if isinstance(node, dict) and key in node and not Path(str(node[key])).is_absolute():
+            node[key] = str((base_path.parent / str(node[key])).resolve())  # relative to its base
     return merge(base, tree)
 
 

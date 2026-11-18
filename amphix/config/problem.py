@@ -15,10 +15,22 @@ from typing import Any
 
 from amphix.config import loader, sections
 from amphix.config.validate import ConfigError
+from amphix.core import mesh as core_mesh
 from amphix.core import registry
 from amphix.core.units import Scales
 
-SHARED = ("scales", "mesh", "time", "output", "solver", "params", "loads", "boundaries", "sources")
+SHARED = (
+    "scales",
+    "mesh",
+    "time",
+    "output",
+    "solver",
+    "params",
+    "loads",
+    "boundaries",
+    "sources",
+    "initial",
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,7 @@ class Problem:
     loads: dict = field(default_factory=dict)
     boundaries: dict = field(default_factory=dict)
     sources: dict = field(default_factory=dict)
+    initial: sections.Initial | None = None  # None: start at rest
     sections: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict, repr=False, compare=False)
 
@@ -78,21 +91,24 @@ def from_dict(tree: dict, name: str = "problem", root: str | Path = ".") -> Prob
         if key not in tree:
             raise ConfigError(key, "missing (required)")
     params, loads = sections.names(tree.get("params", {}), tree.get("loads", {}))
-    output = sections.Output.from_dict(tree.get("output", {}))
+    mesh, time = sections.mesh(tree["mesh"]), sections.Time.from_dict(tree["time"], model)
+    dim = core_mesh.dimension(mesh)
+    output = sections.Output.from_dict(tree.get("output", {}), time, model, dim)
     own = {s: cls.from_dict(tree.get(s, {}), s, model.name) for s, cls in model.sections.items()}
     return Problem(
         name=output.name or name,
         root=Path(root),
         model=model.name,
         scales=sections.scales(tree.get("scales", {})),
-        mesh=sections.mesh(tree["mesh"]),
-        time=sections.Time.from_dict(tree["time"], model),
+        mesh=mesh,
+        time=time,
         output=output,
         solver=sections.solver(tree.get("solver", {})),
         params=params,
         loads=loads,
         boundaries=sections.boundaries(tree.get("boundaries", {}), model),
         sources=sections.sources(tree.get("sources", {}), model),
+        initial=sections.initial(tree.get("initial"), model, Path(root)),
         sections=own,
         raw=copy.deepcopy(tree),
     )

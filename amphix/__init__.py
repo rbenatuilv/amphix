@@ -8,6 +8,7 @@ reconstruction.
     path = amphix.run(problem)                 # build, run, record and save
 
     model = amphix.make_model(problem)         # or step by step
+    amphix.apply_initial(model)                # the `initial` section, if any
     rec = amphix.Recorder(model)
     model.run([rec])
     rec.save()
@@ -30,6 +31,7 @@ from amphix.core.mesh import build as build_domain
 from amphix.core.model import Model, Observer, State, System, make_model
 from amphix.core.registry import MODELS
 from amphix.io.fields import load_fields
+from amphix.io.initial import apply_initial
 from amphix.io.recorder import Recorder
 from amphix.io.results import load_results
 from amphix.physics.poro import ThreeField, TwoField
@@ -49,6 +51,7 @@ __all__ = [
     "System",
     "ThreeField",
     "TwoField",
+    "apply_initial",
     "brain",
     "build_domain",
     "load",

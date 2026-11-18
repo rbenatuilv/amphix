@@ -13,11 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install amphix and the dev tools
+      - name: Install amphix, the dev tools and matplotlib
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python3 -m pip install pyyaml
-          python3 -m pip install -e ".[dev]"
+          python3 -m pip install -e ".[dev,plot]"
 
       - name: pre-commit
         run: pre-commit run --all-files --show-diff-on-failure

@@ -53,7 +53,7 @@ def last_cycle(t):
 def measure(path):
     """Amplitudes on the last cycle: radial flux and p - pc on each line, wall flows."""
     r = np.load(path)
-    t, ts = r["t"], r["snap_t"]
+    t, ts = r["t"], r["lines_t"]
     dt = t[1] - t[0]
     s, c = last_cycle(ts), last_cycle(t)
     out = {}

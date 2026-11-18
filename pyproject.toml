@@ -15,6 +15,7 @@ amphix = "amphix.cli:main"
 
 [project.optional-dependencies]
 dev = ["ruff==0.17.4", "pre-commit==4.7.0", "import-linter==2.16", "mypy==2.4.1", "pytest"]
+plot = ["matplotlib"]      # amphix.plot and `amphix plot`
 
 [tool.setuptools.packages.find]
 include = ["amphix*"]
@@ -70,7 +71,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]  # reached through amphix/__init__.py: read, not checked
 module = ["amphix", "amphix.cli", "amphix.physics.*", "amphix.post.*", "amphix.io.*",
-          "amphix.brain.*"]
+          "amphix.brain.*", "amphix.plot.*"]
 follow_imports = "silent"
 
 # ---- layers: each may use only the layers below it ------------------------------------------
@@ -84,25 +85,33 @@ type = "layers"
 layers = ["amphix.brain", "amphix.physics", "amphix.config", "amphix.core"]
 
 [[tool.importlinter.contracts]]
-name = "measurement stack: io -> post -> core"
+name = "measurement stack: plot -> io -> post -> core"
 type = "layers"
-layers = ["amphix.io", "amphix.post", "amphix.core"]
+layers = ["amphix.plot", "amphix.io", "amphix.post", "amphix.core"]
 
 [[tool.importlinter.contracts]]
-name = "the model stack does not use post/ or io/"
+name = "the model stack does not use post/, io/ or plot/"
 type = "forbidden"
 source_modules = ["amphix.brain", "amphix.physics", "amphix.config", "amphix.core"]
-forbidden_modules = ["amphix.post", "amphix.io"]
+forbidden_modules = ["amphix.post", "amphix.io", "amphix.plot"]
 
 [[tool.importlinter.contracts]]
-name = "post/ and io/ do not use config/, physics/ or brain/"
+name = "post/, io/ and plot/ do not use config/, physics/ or brain/"
 type = "forbidden"
-source_modules = ["amphix.post", "amphix.io"]
+source_modules = ["amphix.post", "amphix.io", "amphix.plot"]
 forbidden_modules = ["amphix.config", "amphix.physics", "amphix.brain"]
 
 [[tool.importlinter.contracts]]
 name = "the layers do not use the command line (cli.py sits on top of them)"
 type = "forbidden"
 source_modules = ["amphix.core", "amphix.config", "amphix.post", "amphix.io",
-                  "amphix.physics", "amphix.brain"]
+                  "amphix.physics", "amphix.brain", "amphix.plot"]
 forbidden_modules = ["amphix.cli"]
+
+[[tool.importlinter.contracts]]
+name = "only plot/ uses matplotlib (optional; cli.py imports plot/ inside the plot command)"
+type = "forbidden"
+source_modules = ["amphix.core", "amphix.config", "amphix.post", "amphix.io",
+                  "amphix.physics", "amphix.brain", "amphix.cli"]
+forbidden_modules = ["matplotlib"]
+allow_indirect_imports = true

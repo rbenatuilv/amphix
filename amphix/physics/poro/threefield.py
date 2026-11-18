@@ -48,6 +48,8 @@ class ThreeField(ThreeFieldBalance, Model):
     condition_kinds = boundary.CONDITIONS
     source_kinds = boundary.SOURCES_3F
     time_keys = frozenset({"newmark_beta", "newmark_gamma"})
+    tracked = frozenset({"d_t", "d_tt", "w_t", "w_tt"})
+    restarts = False  # its flux is w_t, which a fields file does not give back
 
     def elements(self) -> dict[str, Any]:
         """Return DG P_deg (vector) for d and w, DG P_deg_p for p."""

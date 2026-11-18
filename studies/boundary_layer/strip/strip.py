@@ -41,8 +41,8 @@ def run(yaml, n, dt):
     problem = amphix.load(yaml, {"mesh.n": [n, ny], "time.dt": dt, "output.name": name})
     r = amphix.load_results(amphix.run(problem))
     t_end = round(r["t"][-1])
-    s, t = last_cycle(r["snap_t"], t_end), last_cycle(r["t"], t_end)
-    ph = fit(r["snap_t"][s], r["line_axis_p"][s])
+    s, t = last_cycle(r["lines_t"], t_end), last_cycle(r["t"], t_end)
+    ph = fit(r["lines_t"][s], r["line_axis_p"][s])
     # cflux is the flux averaged over the step [t - dt, t]: it belongs to the midpoint t - dt/2
     flow = fit(r["t"][t] - dt / 2, r["cbflux_left"][t])
     ok = np.isfinite(ph)  # a line point the mesh search missed gives NaN
