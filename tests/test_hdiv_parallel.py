@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from hdiv_parallel import run
+from parallel import serial_only
 
 MPIRUN = shutil.which("mpirun", path=str(Path(sys.executable).parent)) or shutil.which("mpirun")
 
@@ -20,6 +21,7 @@ def relative(a, b):
     return np.abs(a - b).max() / np.abs(a).max()
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.slow
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 @pytest.mark.parametrize("model", ["poro2", "poro3"])

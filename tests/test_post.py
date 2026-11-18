@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import ufl
+from parallel import serial_only
 from post_cases import L0, RING, SQUARE, field, results
 from test_hdiv import square
 
@@ -61,7 +62,8 @@ def test_integrals_closed_forms():
         0, abs=1e-18
     )
     cells = PerCell(d, {"one": lambda v: v * m.dx()})
-    assert cells.volume.sum() == pytest.approx(2.0) and np.allclose(cells()["one"], cells.volume)
+    volume = d.mesh.comm.allreduce(cells.volume.sum())  # owned cells on each rank
+    assert volume == pytest.approx(2.0) and np.allclose(cells()["one"], cells.volume)
     assert NormalJump(q, m)() < 1e-12  # continuous: no jump
 
 
@@ -78,6 +80,7 @@ def test_normal_jump_of_raw_and_conservative_fluxes():
         assert cons() < 1e-10 < raw()
 
 
+@serial_only("it compares itself with its own mpirun run")
 @pytest.mark.skipif(MPIRUN is None, reason="no mpirun")
 def test_two_ranks_equal_one():
     serial = results()
