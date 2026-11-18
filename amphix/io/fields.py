@@ -2,7 +2,7 @@
 
     writer = FieldWriter(model.domain, {"p": lambda: model.quantity("p"), "cflux": rec.compute})
     writer(t)                                   # after a step: store every field's dofs (SI)
-    writer.save("results/run_fields.npz", model.problem)
+    writer.save("results/run_fields.npz", model.problem)   # rank 0 writes; the path on every rank
     fl = load_fields("results/run_fields.npz")
     fl.function("p", 0), fl.average("cflux", 2.0, 3.0), fl.domain   # mesh in m, with its tags
     restore("results/run_fields.npz", -1, ["d", "p"], model.domain)  # on the run's own mesh
@@ -36,7 +36,7 @@ import yaml
 from mpi4py import MPI
 
 from amphix.core.mesh import Domain, ghosted_partitioner
-from amphix.io.results import problem_text
+from amphix.io.results import problem_text, written
 
 Source = Callable[[], dolfinx.fem.Function]
 
@@ -104,7 +104,7 @@ def _mesh_data(domain: Domain) -> dict[str, Any] | None:
 
 
 class FieldWriter:
-    """Collect the DG dofs of some SI Functions at each call; save() writes the file (rank 0)."""
+    """Collect the DG dofs of some SI Functions at each call; save() writes them (rank 0)."""
 
     def __init__(self, domain: Domain, sources: dict[str, Source]) -> None:
         """Take {name: a callable returning the current SI Function of that quantity}."""
@@ -149,11 +149,15 @@ class FieldWriter:
             if comm.rank == 0:
                 self.data[name].append(np.concatenate(parts)[self.mesh_data["_order"]])
 
-    def save(self, path: str | Path, problem: Any) -> Path | None:
-        """Write the file (rank 0); return its path (None on the other ranks)."""
-        if self.domain.mesh.comm.rank != 0:
-            return None
-        path = Path(path)
+    def save(self, path: str | Path, problem: Any) -> Path:
+        """Write the file (rank 0); return its path on every rank once it is written."""
+        comm = self.domain.mesh.comm
+        if comm.rank == 0:
+            self._write(Path(path), problem)
+        return written(path, comm)
+
+    def _write(self, path: Path, problem: Any) -> None:
+        """Write the file (rank 0 holds the data)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         mesh = {k: v for k, v in self.mesh_data.items() if k != "_order"}
         out = dict(
@@ -169,7 +173,6 @@ class FieldWriter:
             )  # (nsnap, ncells, ndofs)
             out[f"{name}_deg"], out[f"{name}_shape"] = deg, np.array(shape, dtype=int)
         np.savez(path, **out)
-        return path
 
 
 class Fields:

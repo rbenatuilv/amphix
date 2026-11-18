@@ -35,10 +35,10 @@ from amphix.io.initial import apply_initial
 from amphix.io.recorder import Recorder
 
 
-def run(problem: Any, verbose: bool = True) -> Path | None:
+def run(problem: Any, verbose: bool = True) -> Path:
     """Build the problem's model, set its initial state, run it to T with a Recorder, save.
 
-    Return the results path on rank 0 (None on the others).
+    Return the results path on every rank, once the files are written: any rank can read them.
     """
     talk = verbose and MPI.COMM_WORLD.rank == 0
     start = time.perf_counter()

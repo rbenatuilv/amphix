@@ -4,7 +4,7 @@ exactly its steps; boundary flows as computed by hand; cflux outputs; a 3D run w
 import numpy as np
 import pytest
 import ufl
-from parallel import on_root, total
+from parallel import total
 from test_hdiv import MATERIAL, square
 
 import amphix.physics.poro  # noqa: F401
@@ -29,7 +29,7 @@ def record(problem):
     model = make_model(problem)
     rec = Recorder(model)
     model.run([rec])
-    return rec, load_results(on_root(rec.save()))  # written by rank 0
+    return rec, load_results(rec.save())
 
 
 def test_nothing_requested(tmp_path):

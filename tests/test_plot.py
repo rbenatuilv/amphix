@@ -13,7 +13,7 @@ import matplotlib
 import numpy as np
 import pytest
 from mpi4py import MPI
-from parallel import on_root, serial_only, shared_dir
+from parallel import serial_only, shared_dir
 from PIL import Image
 from test_hdiv import square
 
@@ -58,7 +58,7 @@ def run(tmp_path_factory):
     model = make_model(from_dict(tree, "run", root))
     rec = Recorder(model)
     model.run([rec])
-    on_root(rec.save())  # written: every rank reads it next
+    rec.save()
     return root
 
 

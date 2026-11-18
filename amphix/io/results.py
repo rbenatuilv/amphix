@@ -3,6 +3,9 @@
     path = save_results("results/run.npz", {"t": t, "probe_p": values}, problem)   # rank 0 writes
     res = load_results(path)      # {name: array, ..., "problem": the YAML tree as a dict}
 
+Rank 0 writes; every rank gets the path back once the file is written, so any rank can read it
+right after (under mpirun too).
+
 Everything stored is in SI. The tree is the problem as loaded (bases merged, overrides applied:
 Problem.raw); data given in code is not in it. Only plain arrays are stored, so a file reads back
 with numpy alone (no pickle).
@@ -21,17 +24,22 @@ def problem_text(problem: Any) -> str:
     return yaml.safe_dump(problem.raw, sort_keys=False)
 
 
-def save_results(path: str | Path, arrays: dict[str, Any], problem: Any) -> Path | None:
-    """Write arrays and the problem tree to an .npz on rank 0; return the path (None elsewhere)."""
+def save_results(path: str | Path, arrays: dict[str, Any], problem: Any) -> Path:
+    """Write arrays and the problem tree to an .npz on rank 0; return the path on every rank."""
     if "problem" in arrays:  # on every rank, before the rank-0 write
         raise ValueError("save_results: 'problem' is reserved for the problem tree")
-    if MPI.COMM_WORLD.rank != 0:
-        return None
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = {k: np.asarray(v) for k, v in arrays.items()}
-    np.savez(path, **data, problem=problem_text(problem))
-    return path
+    comm = MPI.COMM_WORLD
+    if comm.rank == 0:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {k: np.asarray(v) for k, v in arrays.items()}
+        np.savez(path, **data, problem=problem_text(problem))
+    return written(path, comm)
+
+
+def written(path: str | Path, comm: MPI.Comm) -> Path:
+    """Return rank 0's path on every rank, once rank 0 has written it (the broadcast waits)."""
+    return Path(comm.bcast(str(path), root=0))
 
 
 def load_results(path: str | Path) -> dict[str, Any]:

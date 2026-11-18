@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from io_cases import measure, problem, run_and_write
 from meshes import write_two_subdomains
-from parallel import on_root, serial_only
+from parallel import serial_only
 
 from amphix.core.mesh import Measures
 from amphix.io.fields import load_fields
@@ -38,9 +38,7 @@ def mpirun(*args):
 
 def test_results_round_trip(tmp_path):
     p = problem()
-    path = on_root(
-        save_results(tmp_path / "r.npz", {"t": [0.0, 0.1], "probe_p": [[1.0], [2.0]]}, p)
-    )
+    path = save_results(tmp_path / "r.npz", {"t": [0.0, 0.1], "probe_p": [[1.0], [2.0]]}, p)
     res = load_results(path)
     assert np.array_equal(res["t"], [0.0, 0.1]) and res["probe_p"].shape == (2, 1)
     assert res["problem"] == p.raw

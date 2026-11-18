@@ -17,7 +17,7 @@ def serial_only(reason):
 
 
 def on_root(value):
-    """Rank 0's value on every rank (save() and run() return the path on rank 0 only)."""
+    """Rank 0's value on every rank (what only rank 0 has: printed output, a temporary folder)."""
     return COMM.bcast(value, root=0)
 
 

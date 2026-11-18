@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import yaml
 from initial_cases import CN, STEADY, problem, restart, state, steady
-from parallel import copy_file, on_root, serial_only, shared_dir, write_text
+from parallel import copy_file, serial_only, shared_dir, write_text
 
 import amphix.physics.poro  # noqa: F401
 from amphix.cli import run
@@ -98,7 +98,7 @@ def test_a_model_does_not_step_without_its_initial_state(tmp_path):
     p = problem(CN, {"p": 0.5}, root=tmp_path).with_({"time.T": 0.01})
     with pytest.raises(RuntimeError, match="initial"):
         make_model(p).step()
-    assert on_root(run(p, verbose=False)).is_file()  # amphix.run applies it
+    assert run(p, verbose=False).is_file()  # amphix.run applies it
 
 
 def test_from_is_relative_to_the_yaml(saved, tmp_path):
@@ -121,7 +121,7 @@ def test_invalid_sections(saved, tmp_path):
     m = make_model(problem(STEADY))
     w = FieldWriter(m.domain, {"p": lambda: m.quantity("p")})
     w(0.0)
-    on_root(w.save(only_p, m.problem))  # written: the other ranks read it next
+    w.save(only_p, m.problem)
     cases = {
         "both": ({"from": str(path), "p": 0}, "not both"),
         "unknown": ({"w": [0, 0]}, "initial.w: not state of poro2"),
