@@ -4,6 +4,7 @@ scaling, order, and the sources."""
 import dolfinx
 import pytest
 import ufl
+from parallel import total
 
 from amphix.core import units as u
 from amphix.core.conditions import ConditionKind, Conditions, SourceKind, Sources, merge_entries
@@ -36,10 +37,6 @@ GOOD = {
 
 def conditions(entries):
     return Conditions(entries, KINDS, DOMAIN, M, EX, SCALES)
-
-
-def total(form):
-    return dolfinx.fem.assemble_scalar(dolfinx.fem.form(form))
 
 
 def test_complete_set():

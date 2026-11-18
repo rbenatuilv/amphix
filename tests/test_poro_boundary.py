@@ -6,6 +6,7 @@ import dolfinx
 import numpy as np
 import pytest
 import ufl
+from parallel import total
 
 from amphix.core.conditions import Conditions
 from amphix.core.expressions import Expressions
@@ -22,10 +23,6 @@ EX = Expressions(DOMAIN.mesh, SCALES, T)
 
 def conditions(entries):
     return Conditions(entries, b.CONDITIONS, DOMAIN, M, EX, SCALES)
-
-
-def total(form):
-    return dolfinx.fem.assemble_scalar(dolfinx.fem.form(form))
 
 
 ENTRIES = {

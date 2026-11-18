@@ -4,6 +4,7 @@ import dolfinx
 import numpy as np
 import pytest
 import ufl
+from parallel import total
 
 from amphix.core.dg import penalty, sym_bnd, sym_jump
 from amphix.core.mesh import Measures, build
@@ -11,10 +12,6 @@ from amphix.core.spaces import MixedSpace, dg_element
 
 DOMAIN = build({"shape": "rectangle", "corners": [[0, 0], [1, 1]], "n": [3, 3]})
 MESH = DOMAIN.mesh
-
-
-def total(form):
-    return dolfinx.fem.assemble_scalar(dolfinx.fem.form(form))
 
 
 def vector_dg(expr, degree=1):
@@ -40,14 +37,15 @@ def test_jumps():
 
 def test_mixed_space():
     space = MixedSpace(MESH, {"d": dg_element(MESH, 2, vector=True), "p": dg_element(MESH, 1)})
-    ncells = MESH.topology.index_map(2).size_local
-    assert space.names == ["d", "p"] and space.ndofs == ncells * (6 * 2 + 3)
+    cmap, wmap = MESH.topology.index_map(2), space.W.dofmap.index_map
+    ncells = cmap.size_local + cmap.num_ghosts  # DG: a cell's dofs are local or ghost with it
+    assert space.names == ["d", "p"] and space.ndofs == cmap.size_global * (6 * 2 + 3)
     d, p = space.dofs["d"], space.dofs["p"]
     assert len(d) == ncells * 12 and len(np.intersect1d(d, p)) == 0  # disjoint, all of W
-    assert (
-        len(np.union1d(d, p)) == space.W.dofmap.index_map.size_local * space.W.dofmap.index_map_bs
-    )
-    assert len(space.owned_dofs("d")) + len(space.owned_dofs("p")) == space.ndofs  # serial
+    bs = space.W.dofmap.index_map_bs
+    assert len(np.union1d(d, p)) == (wmap.size_local + wmap.num_ghosts) * bs
+    owned = len(space.owned_dofs("d")) + len(space.owned_dofs("p"))
+    assert owned == wmap.size_local * bs and MESH.comm.allreduce(owned) == space.ndofs
     assert set(space.trial()) == set(space.test()) == {"d", "p"}
     fields = space.functions()
     x = ufl.SpatialCoordinate(MESH)
@@ -57,6 +55,7 @@ def test_mixed_space():
         )
     )
     fields["p"].x.array[:] = np.linspace(0, 1, fields["p"].x.array.size)
+    fields["p"].x.scatter_forward()  # the ghosts take their owners' values, as split() gives
     mixed = dolfinx.fem.Function(space.W)
     space.join(fields, mixed)
     back = space.functions()

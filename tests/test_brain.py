@@ -257,19 +257,23 @@ def test_annulus_wall_refinement():
     assert "wall" not in geometries.annulus()
     domain = build(geometries.annulus(h=h, wall=wall), 1e-2)
     assert set(domain.facet_names) == {"ventricle", "pial"}
-    size, ratio, centre = triangle_shapes(domain)
+    size, ratio, centre = triangle_shapes(domain)  # owned cells
     mesh, tags = domain.mesh, domain.facet_tags
+    comm = mesh.comm
     f2c = mesh.topology.connectivity(1, 2)
     for name in ("ventricle", "pial"):
         facets = tags.indices[tags.values == domain.facet_tag(name)]
-        cells = np.unique(np.concatenate([f2c.links(f) for f in facets]))
-        assert size[cells].max() <= 1.5 * wall["h"], name
+        cells = np.unique(np.concatenate([f2c.links(f) for f in facets] + [[]])).astype(int)
+        cells = cells[cells < len(size)]  # owned: a facet on a rank boundary has a ghost cell
+        largest = comm.allreduce(size[cells].max(initial=0.0), op=MPI.MAX)
+        assert largest <= 1.5 * wall["h"], name
     r_pial = 1e-2 - np.linalg.norm(centre, axis=1)
     r_ventricle = np.linalg.norm(centre - [3e-3, 0.0], axis=1) - 2.5e-3
     far = np.minimum(r_pial, r_ventricle) > wall["band"] + wall["growth"] + h
-    assert np.median(size[far]) == pytest.approx(h, rel=0.1)
-    assert 0.7 * h < size[far].min() and size[far].max() < 1.5 * h
-    assert ratio.max() < 2.5  # isotropic
+    far_sizes = np.concatenate(comm.allgather(size[far]))  # the median over every rank
+    assert np.median(far_sizes) == pytest.approx(h, rel=0.1)
+    assert 0.7 * h < far_sizes.min() and far_sizes.max() < 1.5 * h
+    assert comm.allreduce(ratio.max(), op=MPI.MAX) < 2.5  # isotropic
 
 
 def triangle_shapes(domain):

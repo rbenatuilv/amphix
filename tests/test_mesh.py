@@ -3,22 +3,34 @@
 import numpy as np
 import pytest
 from meshes import integrals, write_two_subdomains
+from mpi4py import MPI
 
 from amphix.core.mesh import build, check
 
 
+def present(domain, tags):
+    """The tag values present on any rank."""
+    return set().union(*domain.mesh.comm.allgather(set(np.unique(tags.values).tolist())))
+
+
 def counts(domain):
-    """Number of boundary facets of each named boundary."""
-    values = domain.facet_tags.values
-    return {name: int(np.sum(values == tag)) for name, tag in domain.facet_names.items()}
+    """Number of boundary facets of each named boundary (owned facets, summed over the ranks)."""
+    mesh, tags = domain.mesh, domain.facet_tags
+    nowned = mesh.topology.index_map(mesh.topology.dim - 1).size_local
+    values = tags.values[tags.indices < nowned]
+    return {
+        name: mesh.comm.allreduce(int(np.sum(values == tag)))
+        for name, tag in domain.facet_names.items()
+    }
 
 
 def test_rectangle_and_box():
     rect = build({"shape": "rectangle", "corners": [[0, 0], [2e-2, 1e-2]], "h": 2.5e-3}, L0=1e-2)
     assert rect.mesh.topology.index_map(2).size_global == 2 * 8 * 4  # n = [8, 4] from h
     assert counts(rect) == {"left": 4, "right": 4, "bottom": 8, "top": 8}
-    assert np.isclose(rect.mesh.geometry.x[:, 0].max(), 2.0)  # solver units: x / L0
-    assert set(np.unique(rect.cell_tags.values)) == {1} and rect.cell_names == {}
+    xmax = rect.mesh.comm.allreduce(rect.mesh.geometry.x[:, 0].max(), op=MPI.MAX)
+    assert np.isclose(xmax, 2.0)  # solver units: x / L0
+    assert present(rect, rect.cell_tags) == {1} and rect.cell_names == {}
     cube = build({"shape": "box", "corners": [[0, 0, 0], [2, 1, 1]], "n": [2, 1, 1]})
     assert cube.mesh.topology.index_map(3).size_global == 12  # 6 tetrahedra per cube
     assert list(cube.facet_names) == ["left", "right", "front", "back", "bottom", "top"]
@@ -53,7 +65,7 @@ def test_rectangle_and_box():
 def test_round_shapes(section, names):
     domain = build(section)
     assert set(domain.facet_names) == names
-    assert set(np.unique(domain.facet_tags.values)) == set(domain.facet_names.values())
+    assert present(domain, domain.facet_tags) == set(domain.facet_names.values())
     if "inner" in names:  # the hole is the smaller boundary
         assert counts(domain)["inner"] < counts(domain)["outer"]
 
@@ -82,7 +94,7 @@ def test_gmsh_file_with_subdomains(tmp_path):
         {"shape": "gmsh", "file": "two.msh", "names": {"skull": "outer"}}, L0=2.0, root=tmp_path
     )
     assert domain.facet_names == {"outer": 3} and domain.cell_names == {"tissue": 5, "fluid": 7}
-    assert set(np.unique(domain.cell_tags.values)) == {5, 7}
+    assert present(domain, domain.cell_tags) == {5, 7}
     i = integrals(domain)
     assert i["dx_tissue"] == pytest.approx(0.25) and i["dx_fluid"] == pytest.approx(0.25)  # / L0^2
 
