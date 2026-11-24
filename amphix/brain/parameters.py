@@ -90,7 +90,7 @@ PRV23_SET = ParameterSet(
         "mu": f"from E = 1642 Pa, nu = 0.495 {PRV23}, rounded (E / (2 (1 + nu)) = 549.16 Pa)",
         "lambda": f"from E = 1642 Pa, nu = 0.495 {PRV23}, rounded"
         " (E nu / ((1 + nu)(1 - 2 nu)) = 54367.2 Pa)",
-        "alpha": PRV23,
+        "alpha": f"{PRV23}; alpha = 1 - K_dr / K_s = 1 (incompressible constituents, K_s >> K_dr)",
         "c0": f"{PRV23}: storage coefficient s",
         "K": f"from the hydraulic conductivity K / muF = 1.57e-5 mm^2/(Pa s) = 1.57e-11 m^2/(Pa s)"
         f" {PRV23}, times muF: K = 1.57e-11 * 0.8e-3",

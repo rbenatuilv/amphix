@@ -1,6 +1,6 @@
 """brain/: a preset resolves to the material it stands for, a material without `preset` is its own
-keys, keys next to a preset override it, the cvr22 values and sources, the waveforms (zero mean and
-the stroke volume of the vascular source) and the geometries."""
+keys, keys next to a preset override it, the cvr22 and prv23 values and sources, the waveforms
+(zero mean and the stroke volume of the vascular source) and the geometries."""
 
 import math
 import warnings
