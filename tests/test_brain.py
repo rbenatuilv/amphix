@@ -68,7 +68,8 @@ def test_a_preset_is_its_inline_material(model, inline):
 
 
 def test_the_presets():
-    assert set(PRESETS) == {"cvr22"} and set(parameters.PRESETS) == {"cvr22"}
+    assert set(PRESETS) == {"cvr22", "prv23"}
+    assert set(parameters.PRESETS) == {"cvr22", "prv23"}
 
 
 # ---- without `preset`, the keys given -----------------------------------------------------------
@@ -146,6 +147,20 @@ def test_cvr22_values_and_sources():
         assert "from E = 1500 Pa, nu = 0.479 Causemann" in cvr.sources[key]
         assert "rounded" in cvr.sources[key]
     assert "10.1186/s12987-022-00376-2" in cvr.sources["K"]
+
+
+def test_prv23_values_and_sources():
+    prv = PRESETS["prv23"]
+    mu, lam = prv.values["mu"], prv.values["lambda"]
+    E, nu = mu * (3 * lam + 2 * mu) / (lam + mu), lam / (2 * (lam + mu))
+    assert abs(E - 1642.0) < 0.5 and abs(nu - 0.495) < 1e-5  # [PRV23], rounded
+    assert math.isclose(prv.values["K"] / prv.values["muF"], 1.57e-11)  # [PRV23]: K / muF only
+    assert prv.values["alpha"] == 1.0 and prv.values["c0"] == 3.9e-4
+    for key in ("rho", "rho_f", "phi", "tortuosity"):  # from [M25], as cvr22
+        assert prv.values[key] == PRESETS["cvr22"].values[key], key
+        assert prv.sources[key] == PRESETS["cvr22"].sources[key]
+    assert set(prv.sources) == set(prv.values) and all(prv.sources.values())
+    assert "10.1371/journal.pone.0288668" in prv.sources["K"]
 
 
 # ---- waveforms -----------------------------------------------------------------------------------
